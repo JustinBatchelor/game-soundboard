@@ -56,6 +56,7 @@ First launch imports missing starters; **Get starter clips** retries failed down
 - [COD Zombies — Kaboom!](https://www.youtube.com/watch?v=UO9JSE3aRtw)
 - [Kool-Aid Man — Oh Yeah!](https://www.myinstants.com/en/instant/oh-yeah-kool-aid-man-35548/)
 - [CSGO/CS2 — Bomb has been planted](https://www.myinstants.com/en/instant/bomb-has-been-planted-csgo-cs2-75763/)
+- [CSGO/CS2 — Bomb has been defused](https://www.myinstants.com/en/instant/cs-go-bomb-has-been-defused-95024/)
 - [SpongeBob — Oh brother, this guy stinks!](https://www.myinstants.com/en/instant/oh-brother-this-guy-stinks/)
 - [Fahh — meme sound effect](https://www.youtube.com/watch?v=VP6eZu3SAak)
 
