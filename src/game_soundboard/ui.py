@@ -141,7 +141,7 @@ class Window(QMainWindow):
         self.playback = Playback(library, self)
         self.playback.error.connect(self.notice)
         self.playback.changed.connect(self.playing)
-        self.shortcuts = Shortcuts(self) if live else None
+        self.shortcuts = Shortcuts(self, registry_path=library.root / "shortcuts.json") if live else None
         self.router = RoutingWorker(library) if live else None
         self.setWindowTitle("Game Soundboard")
         self.setMinimumSize(720, 560)

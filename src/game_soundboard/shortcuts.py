@@ -3,16 +3,52 @@ The worker emits Qt signals; the GUI and audio objects stay on the Qt main threa
 """
 import asyncio
 import concurrent.futures
+import json
 import threading
 import uuid
 from dbus_next import Message, MessageType, Variant
 from dbus_next.aio import MessageBus
 from PySide6.QtCore import QObject, Signal
 from . import APP_ID
+from .keybinds import normalized_trigger
+from .library import atomic_json
 
 DEST = "org.freedesktop.portal.Desktop"
 PATH = "/org/freedesktop/portal/desktop"
 IFACE = "org.freedesktop.portal.GlobalShortcuts"
+
+
+class BindingRegistry:
+    """Keep portal identities stable until the user changes a preferred key.
+
+    Desktops remember approved triggers by shortcut ID and can ignore a new
+    preferred_trigger for an old ID. Sound IDs must remain stable, so give each
+    binding revision its own persisted portal ID and translate events back.
+    """
+    def __init__(self, path):
+        self.path = path
+
+    def prepare(self, entries):
+        previous = {}
+        if self.path and self.path.exists():
+            saved = json.loads(self.path.read_text())
+            if saved.get("version") != 1:
+                raise ValueError("Unsupported shortcut registration version")
+            previous = saved["bindings"]
+        current, shortcuts, actions = {}, [], {}
+        for ident, label, trigger in entries:
+            trigger = normalized_trigger(trigger)
+            binding = previous.get(ident)
+            if not binding or binding["trigger"] != trigger:
+                binding = {"trigger": trigger, "portal_id": "binding-" + uuid.uuid4().hex}
+            current[ident] = binding
+            portal_id = binding["portal_id"]
+            shortcuts.append([portal_id, {"description": Variant("s", label),
+                                          "preferred_trigger": Variant("s", trigger)}])
+            actions[portal_id] = ident
+        if self.path and current != previous:
+            atomic_json(self.path, {"version": 1, "bindings": current})
+        return shortcuts, actions
 
 
 class Shortcuts(QObject):
@@ -20,7 +56,7 @@ class Shortcuts(QObject):
     status = Signal(str)
     bindings = Signal(dict)
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, *, registry_path=None):
         super().__init__(parent)
         self.loop = asyncio.new_event_loop()
         self.thread = threading.Thread(target=self._run, daemon=True)
@@ -29,6 +65,8 @@ class Shortcuts(QObject):
         self.responses = {}
         self.held = set()
         self.gate = None
+        self.registry = BindingRegistry(registry_path)
+        self.actions = {}
         self.thread.start()
 
     def _run(self):
@@ -69,9 +107,9 @@ class Shortcuts(QObject):
                 return
             if msg.member == "Activated":
                 ident = msg.body[1]
-                if ident not in self.held:
+                if ident in self.actions and ident not in self.held:
                     self.held.add(ident)
-                    self.activated.emit(ident)
+                    self.activated.emit(self.actions[ident])
             elif msg.member == "Deactivated":
                 self.held.discard(msg.body[1])
             elif msg.member == "ShortcutsChanged":
@@ -80,12 +118,13 @@ class Shortcuts(QObject):
             if msg.path == self.session:
                 self.session = None
                 self.held.clear()
+                self.actions.clear()
                 self.bindings.emit({})
                 self.status.emit("Shortcut session closed · click Configure shortcuts to reconnect")
 
     def publish(self, shortcuts):
-        labels = {ident: values.get("trigger_description", Variant("s", "")).value
-                  for ident, values in shortcuts}
+        labels = {self.actions[ident]: values.get("trigger_description", Variant("s", "")).value
+                  for ident, values in shortcuts if ident in self.actions}
         self.bindings.emit(labels)
 
     async def request(self, method, signature, body, options):
@@ -105,29 +144,26 @@ class Shortcuts(QObject):
             self.responses.pop(path, None)
 
     def bind(self, entries):
-        return asyncio.run_coroutine_threadsafe(self._bind(entries), self.loop)
+        return asyncio.run_coroutine_threadsafe(self._bind(list(entries)), self.loop)
 
     async def _bind(self, entries):
         if self.gate is None:
             self.gate = asyncio.Lock()
         if self.gate.locked():
-            self.status.emit("Finish the open shortcut dialog first")
-            return
+            self.status.emit("Finish the open shortcut dialog; your latest changes are queued")
         async with self.gate:
             try:
                 self.status.emit("Connecting global shortcuts…")
                 await self.connect()
                 await self.close_session()
                 self.bindings.emit({})
+                shortcuts, self.actions = self.registry.prepare(entries)
                 if not entries:
                     self.status.emit("No global shortcuts assigned")
                     return
                 options = {"session_handle_token": Variant("s", "s" + uuid.uuid4().hex)}
                 result = await self.request("CreateSession", "a{sv}", [options], options)
                 self.session = result["session_handle"].value
-                shortcuts = [[ident, {"description": Variant("s", label),
-                                      "preferred_trigger": Variant("s", trigger)}]
-                             for ident, label, trigger in entries]
                 opts = {}
                 self.status.emit("Approve shortcuts in the desktop dialog")
                 result = await self.request("BindShortcuts", "oa(sa{sv})sa{sv}",
@@ -143,6 +179,7 @@ class Shortcuts(QObject):
     async def close_session(self):
         old, self.session = self.session, None
         self.held.clear()
+        self.actions.clear()
         if old and self.bus and self.bus.connected:
             try:
                 await self.call("org.freedesktop.portal.Session", "Close", path=old)

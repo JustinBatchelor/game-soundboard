@@ -70,7 +70,7 @@ If teammates cannot hear you, check the physical headset mute button, **Mute voi
 
 Upgrading from the first version: virtual devices previously appeared with the truncated name **Soundboard**. Reselect **Soundboard Microphone** in CS2; restart the game with the soundboard running if its device list is stale. CS2's **Hear My Own Voice** test is separate from this app's **Hear my voice** checkbox.
 
-The desktop owns global binding decisions. Rebinding a preferred key may require **Configure approved shortcuts in desktop**; the desktop may retain earlier approved bindings. Clearing a sound's keybind removes it from the active session. Duplicate preferences within the app are rejected; desktop conflicts/denials appear in the status area. Shortcuts work only while the app is running in your logged-in desktop session.
+The desktop owns global binding decisions. Saving a changed key creates a fresh desktop registration so an earlier approved key cannot silently replace the new preference. Approve the new binding if your desktop prompts. Unchanged registrations survive relaunch; sound IDs remain unchanged. **Configure approved shortcuts in desktop** opens the desktop’s own editor. Clearing a sound's keybind removes it from the active session. Duplicate preferences within the app are rejected; desktop conflicts/denials appear in the status area. Shortcuts work only while the app is running in your logged-in desktop session.
 
 ## Starter recordings
 
