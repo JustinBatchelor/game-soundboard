@@ -12,6 +12,7 @@ from game_soundboard.audio_service import AudioClient
 from game_soundboard.library import Library
 from game_soundboard.ui import Window
 from game_soundboard.starters import STARTERS
+from game_soundboard.routing import Routing
 
 app = QApplication([])
 app.setDesktopFileName(APP_ID)
@@ -25,6 +26,11 @@ with wave.open(str(source), "wb") as audio:
     audio.setframerate(48000)
     audio.writeframes(b"\0\0" * 4800)
 library = Library(root / "library")
+devices = Routing(root)
+sources, sinks = devices.devices()
+library.settings.update(devices_initialized=True,
+                        microphone=sources[0]['name'] if sources else '',
+                        output=sinks[0]['name'] if sinks else '')
 library.seeded = [entry[0] for entry in STARTERS]
 for name in ("Test tone", "Second tone", "Bomb search fixture"):
     library.commit(library.prepare(source, name))
@@ -34,7 +40,7 @@ failures = []
 def verify():
     try:
         assert 'No app is using Soundboard Microphone' in window.audio_status.text(), window.audio_status.text()
-        assert window.voice_effect.count() == 5
+        assert window.voice_effect.count() == 8  # five generic + three unavailable named AI presets
         assert not window.voice_monitor.isChecked()
         window.voice_effect.setCurrentIndex(window.voice_effect.findData('robot'))
         assert Library(library.root).settings['voice_effect'] == 'robot'
@@ -49,6 +55,8 @@ def verify():
         assert len(window.pads) == 3
         print('PASS: live panel, three sound cards, search, persistent device selection and audio outputs', flush=True)
     except Exception as exc:
+        import traceback
+        traceback.print_exc()
         failures.append(str(exc))
     finally:
         window.close()

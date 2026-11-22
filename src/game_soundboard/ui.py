@@ -15,6 +15,7 @@ from .voice_effects import PRESETS
 from .shortcuts import Shortcuts
 from .keybinds import ShortcutRecorder, normalized_trigger
 from .starters import STARTERS, download_starter
+from .ai_ui import AIControls
 
 
 class RoutingWorker(QObject):
@@ -26,6 +27,7 @@ class RoutingWorker(QObject):
         super().__init__()
         self.client = AudioClient(library.root)
         self.connect_requests = []
+        self.commands = []
         self.lock = threading.Lock()
         self.wake = threading.Event()
         self.stopping = threading.Event()
@@ -40,6 +42,11 @@ class RoutingWorker(QObject):
             self.connect_requests.append(dict(app))
         self.wake.set()
 
+    def command(self, command, **values):
+        with self.lock:
+            self.commands.append((command, values))
+        self.wake.set()
+
     def run(self):
         while not self.stopping.is_set():
             try:
@@ -47,6 +54,12 @@ class RoutingWorker(QObject):
                 state = self.client.request("refresh")
                 with self.lock:
                     requests, self.connect_requests = self.connect_requests, []
+                    commands, self.commands = self.commands, []
+                for command, values in commands:
+                    try:
+                        state = self.client.request(command, **values)
+                    except Exception as exc:
+                        self.connected.emit("Voice command failed: " + str(exc))
                 for requested in requests:
                     try:
                         state = self.client.request("connect", app=requested)
@@ -98,7 +111,7 @@ QPushButton#primary { background: #177c70; border-color: #3acbb2; }
 QPushButton#stop { background: #6c2b39; border-color: #bc5c72; }
 QPushButton#pad { font-size: 20px; font-weight: bold; padding: 24px 12px; background: #213f4a; }
 QPushButton#pad[playing="true"] { background: #177c70; border: 2px solid #64efd0; }
-QLineEdit, QComboBox { background: #172130; padding: 9px; border: 1px solid #40516c; border-radius: 6px; }
+QLineEdit, QComboBox, QSpinBox { background: #172130; padding: 9px; border: 1px solid #40516c; border-radius: 6px; }
 QComboBox QAbstractItemView { background: #172130; selection-background-color: #177c70; }
 QWidget#gridbody { background: #10151f; }
 QScrollArea { border: none; background: transparent; }
@@ -196,8 +209,8 @@ class Window(QMainWindow):
         self.voice_effect = QComboBox()
         for key, preset in PRESETS.items():
             self.voice_effect.addItem(preset[0], key)
-        self.voice_effect.setCurrentIndex(max(0, self.voice_effect.findData(library.settings["voice_effect"])))
-        self.voice_effect.currentIndexChanged.connect(lambda: self.setting("voice_effect", self.voice_effect.currentData()))
+        self.voice_effect.setCurrentIndex(0)
+        self.voice_effect.currentIndexChanged.connect(self.voice_selected)
         effects.addWidget(self.voice_effect, 1)
         self.voice_monitor = QCheckBox("Hear my voice")
         self.voice_monitor.setToolTip("Hear the processed microphone through your selected headphones. Adds a short delay; use headphones to avoid feedback.")
@@ -205,6 +218,8 @@ class Window(QMainWindow):
         self.voice_monitor.toggled.connect(lambda value: self.setting("voice_monitor", value))
         effects.addWidget(self.voice_monitor)
         layout.addLayout(effects)
+        self.ai_controls = AIControls(self)
+        layout.addWidget(self.ai_controls)
         self.audio_status = QLabel("Connecting audio…" if live else "Preview mode · audio routing disabled")
         self.shortcut_status = QLabel("No global shortcuts assigned")
         self.feedback = QLabel("Ready · WAV, MP3, OGG and FLAC")
@@ -234,6 +249,23 @@ class Window(QMainWindow):
         if self.router:
             self.router.update(self.library.settings)
 
+    def voice_selected(self):
+        value = self.voice_effect.currentData() or "normal"
+        if value.startswith("ai:"):
+            self.ai_controls.choose(value[3:])
+        else:
+            self.setting("voice_effect", value)
+            if self.router:
+                self.router.command("voice_effect", effect=value)
+
+    def return_normal(self):
+        self.setting("voice_effect", "normal")
+        self.voice_effect.blockSignals(True)
+        self.voice_effect.setCurrentIndex(0)
+        self.voice_effect.blockSignals(False)
+        if self.router:
+            self.router.command("voice_normal")
+
     def routed(self, state):
         if state.get("initial_settings") and not self.library.settings.get("devices_initialized"):
             for key in ("microphone", "output", "devices_initialized"):
@@ -242,6 +274,8 @@ class Window(QMainWindow):
         self.sources, self.sinks = state["sources"], state["sinks"]
         self.capture_apps = state.get("capture_apps", [])
         self.audio_status.setText(state["message"])
+        self.ai_controls.populate()
+        self.ai_controls.update_state(state)
         self.playback.routes(state["clip_sink"], state["output"])
 
     def routing_error(self, text):
@@ -278,6 +312,8 @@ class Window(QMainWindow):
             return
         if ident == "stop-all":
             self.playback.stop_all()
+        elif ident == "voice-normal":
+            self.return_normal()
         else:
             self.playback.play(ident)
 
@@ -289,6 +325,8 @@ class Window(QMainWindow):
         result = [(s["id"], "Play " + s["name"], s["shortcut"]) for s in self.library.sounds if s["shortcut"]]
         if self.library.settings["stop_shortcut"]:
             result.append(("stop-all", "Stop all sounds", self.library.settings["stop_shortcut"]))
+        if self.library.settings["normal_shortcut"]:
+            result.append(("voice-normal", "Return to Normal voice", self.library.settings["normal_shortcut"]))
         return result
 
     def bind_shortcuts(self):
@@ -432,6 +470,8 @@ class Window(QMainWindow):
             combos[key] = combo
         stop = ShortcutRecorder(self.library.settings["stop_shortcut"])
         form.addRow("Stop All keybind", stop)
+        normal = ShortcutRecorder(self.library.settings["normal_shortcut"])
+        form.addRow("Return to Normal keybind", normal)
         info = QLabel("Assign sound keybinds using each card’s Edit button.\n"
                       "Select Soundboard Microphone inside your game/Discord.\n"
                       "Game push-to-talk still applies; noise suppression may filter clips.\n"
@@ -443,6 +483,9 @@ class Window(QMainWindow):
         def save():
             try:
                 self.validate_shortcut(stop.trigger(), "stop-all")
+                self.validate_shortcut(normal.trigger(), "voice-normal")
+                if stop.trigger() and normalized_trigger(stop.trigger()) == normalized_trigger(normal.trigger()):
+                    raise ValueError("Stop All and Return to Normal need different shortcuts")
                 dialog.accept()
             except ValueError as exc:
                 QMessageBox.warning(dialog, "Check shortcut", str(exc))
@@ -453,6 +496,7 @@ class Window(QMainWindow):
             for key, combo in combos.items():
                 self.library.settings[key] = combo.currentData()
             self.library.settings["stop_shortcut"] = stop.trigger()
+            self.library.settings["normal_shortcut"] = normal.trigger()
             self.library.save()
             if self.router:
                 self.router.update(self.library.settings)

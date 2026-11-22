@@ -78,6 +78,23 @@ with tempfile.TemporaryDirectory(prefix='soundboard-instance-') as tmp:
         assert duplicate.returncode == 0, duplicate.stderr
         assert client.request('ping')['pid'] == service.pid
         print('PASS: duplicate service exits without disturbing audio', flush=True)
+        service.kill()
+        service.wait(timeout=5)
+        service = subprocess.Popen([sys.executable, '-m', 'game_soundboard.audio_service', '--data-dir', tmp],
+                                   env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        deadline = time.monotonic() + 8
+        while time.monotonic() < deadline:
+            try:
+                if client.request('ping')['pid'] == service.pid:
+                    client.request('refresh')
+                    break
+            except (OSError, RuntimeError):
+                pass
+            time.sleep(.1)
+        assert next(s['index'] for s in router.listing('sources') if s['name'] == router.source) == source_index
+        capture = next(a for a in router.capture_apps() if a['name'] == 'SoundboardPanelLifecycleTest')
+        assert capture['index'] == capture_id and capture['connected']
+        print('PASS: service crash/restart adopts the same source and native capture stream', flush=True)
     finally:
         stop(process)
         stop(recorder)

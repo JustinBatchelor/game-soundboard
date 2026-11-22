@@ -20,3 +20,8 @@ dist/
 library.json
 app.lock
 backups/
+*.pth
+*.pt
+*.onnx
+*.index
+*.safetensors

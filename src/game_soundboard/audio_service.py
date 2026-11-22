@@ -15,6 +15,8 @@ import time
 
 from .library import DEFAULTS, data_directory
 from .routing import Routing
+from .ai_supervisor import AISupervisor
+from .voice_effects import PRESETS
 
 UNIT = "game-soundboard-audio.service"
 MAX_MESSAGE = 256 * 1024
@@ -92,11 +94,15 @@ class AudioClient:
 
 
 class AudioService:
-    def __init__(self, root, router=None):
+    def __init__(self, root, router=None, ai=None):
         self.root = Path(root).absolute()
         self.router = router or Routing(self.root)
         self.state = None
         self.error = "Audio routing is starting"
+        self.ai = ai or AISupervisor(self.root)
+        self.effect = "normal"
+        self.saved_effect = None
+        self.settings = dict(DEFAULTS)
 
     def refresh(self):
         try:
@@ -105,6 +111,11 @@ class AudioService:
             if document.get("version") != 1:
                 raise ValueError("Unsupported library version")
             settings = dict(DEFAULTS, **document.get("settings", {}))
+            saved_effect = settings.get("voice_effect", "normal")
+            if self.saved_effect is not None and saved_effect != self.saved_effect:
+                self.ai.normal()
+                self.effect = saved_effect if saved_effect in PRESETS else "normal"
+            self.saved_effect = saved_effect
             initial = None
             if not settings.get("devices_initialized"):
                 sources, sinks = self.router.devices()
@@ -114,12 +125,28 @@ class AudioService:
                 settings["output"] = out if out in {d["name"] for d in sinks} else ""
                 settings["devices_initialized"] = True
                 initial = settings.copy()
+            self.settings = dict(settings)
+            self.ai.tick()
+            if self.ai.phase in ("loading", "active"):
+                sources, _ = self.router.devices()
+                if settings["microphone"] != self.ai.microphone or settings["microphone"] not in {s["name"] for s in sources}:
+                    self.ai.fail("Selected microphone changed or disconnected; select a model to retry")
+            settings["voice_effect"] = self.effect if self.ai.phase == "normal" else "normal"
+            settings["_ai_mode"] = self.ai.phase
             self.state = self.router.reconcile(settings)
+            if self.ai.phase in ("loading", "active") and self.state.get("voice_error"):
+                self.ai.fail(self.state["voice_error"])
+                settings["_ai_mode"] = "failed"
+                self.state = self.router.reconcile(settings)
+            self.state["ai"] = self.ai.status()
+            self.state["active_effect"] = self.effect if self.ai.phase == "normal" else "normal"
             self.state["initial_settings"] = initial
             self.state["persistent"] = True
             self.state["message"] += " · microphone stays on when panel closes"
             self.error = ""
         except Exception as exc:
+            if self.ai.phase in ("loading", "active"):
+                self.ai.fail("Audio routing failed: " + str(exc))
             self.error = str(exc)
 
     def handle(self, request):
@@ -130,6 +157,29 @@ class AudioService:
             self.refresh()
         elif command == "connect":
             self.router.connect_app(request["app"])
+            self.refresh()
+        elif command == "ai_activate":
+            self.refresh()
+            if self.error:
+                raise RuntimeError(self.error)
+            self.effect = "normal"
+            self.ai.activate(request["model"], request.get("pitch", 0), request.get("profile", "responsive"),
+                             self.settings["microphone"], self.router.ai_input + ".monitor", self.router.ai_return)
+            self.refresh()
+        elif command in ("ai_cancel", "voice_normal", "voice_effect"):
+            effect = request.get("effect", "normal") if command == "voice_effect" else "normal"
+            if effect not in PRESETS:
+                raise ValueError("Unknown voice effect")
+            self.ai.normal()
+            self.effect = effect
+            self.refresh()
+        elif command == "ai_remove":
+            ident = request["model"]
+            if self.ai.requested == ident:
+                self.ai.normal()
+                self.effect = "normal"
+                self.refresh()
+            self.ai.models.remove(ident)
             self.refresh()
         elif command != "status":
             raise ValueError("Unknown audio service command")
@@ -151,10 +201,12 @@ class AudioService:
                 server.bind(str(path))
                 path.chmod(0o600)
                 server.listen(8)
-                server.settimeout(.5)
+                server.settimeout(.1)
                 try:
                     next_refresh = 0
                     while not stopped.is_set():
+                        if self.ai.tick():
+                            self.refresh()
                         if time.monotonic() >= next_refresh:
                             self.refresh()
                             next_refresh = time.monotonic() + 3
@@ -174,6 +226,7 @@ class AudioService:
                                     pass
                 finally:
                     path.unlink(missing_ok=True)
+                    self.ai.stop()
                     self.router.cleanup()
 
 

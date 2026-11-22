@@ -56,9 +56,11 @@ systemctl --user disable --now game-soundboard-audio.service
 
 Opening the panel starts the service again. Re-enable login startup with `systemctl --user enable game-soundboard-audio.service`. A source checkout without an installed unit starts a detached daemon for its library instead; its log is `audio-service.log` in that library directory.
 
-The first upgrade from panel-owned routing requires one device replacement. A game may need one restart during that handoff. Routine panel closes and reopens preserve the device afterward. Explicit service stops, audio-server restarts, and logout can still interrupt capture; no service can retain a PipeWire device across the audio server itself being replaced.
+The first upgrade from panel-owned routing requires one device replacement. A game may need one restart during that handoff. Routine panel closes and reopens preserve the device afterward. A crashed service can now adopt its complete existing audio graph without replacing the microphone; it resumes in Normal voice. Explicit service stops, audio-server restarts, and logout can still interrupt capture; no service can retain a PipeWire device across the audio server itself being replaced.
 
 ## Live voice effects and microphone checks
+
+Local RVC **AI impressions** are available through an optional isolated runtime and managed model imports. See [AI voices: setup, routing, model evidence and acceptance tests](docs/AI-VOICES.md). AI starts off after service/login restart; **Return to Normal** cancels loading or conversion. Closing the panel leaves an already-active AI voice running. Named model weights are personal local data and are not bundled here.
 
 Choose **Normal**, **Baby / Helium** (+8 semitones), **Deep voice** (−6 semitones), **Robot**, or **Radio** from the panel. These are local microphone effects; clip playback is unchanged. Normal is the default. Switching presets preserves the public microphone device and its connected applications. Missing or failed effects suspend the microphone route and display an error while keeping clips available; choose Normal to restore unprocessed voice.
 

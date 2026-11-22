@@ -31,6 +31,8 @@ class Routing:
         self.source = self.prefix + "_microphone"
         self.voice = self.prefix + "_voice"
         self.effect = self.prefix + "_effect"
+        self.ai_input = self.prefix + "_ai_input"
+        self.ai_return = self.prefix + "_ai_return"
         self.run_override = run
         self.modules = {}
         self.config = None
@@ -64,10 +66,10 @@ class Routing:
             tokens = shlex.split(module.get("argument", ""))
         except ValueError:
             return False
-        sinks = (self.clips, self.mix, self.voice, self.effect)
+        sinks = (self.clips, self.mix, self.voice, self.effect, self.ai_input, self.ai_return)
         owned_tokens = [f"{key}={sink}" for sink in sinks for key in ("sink_name", "sink")]
         owned_tokens += [f"source_name={self.source}", f"source={self.clips}.monitor",
-                         f"source={self.voice}.monitor"]
+                         f"source={self.voice}.monitor", f"source={self.ai_return}.monitor"]
         return any(t in tokens for t in owned_tokens)
 
     def cleanup(self):
@@ -84,6 +86,37 @@ class Routing:
             self.modules.clear()
             self.config = None
             self.monitor_config = None
+
+    def adopt(self):
+        """Recover a complete owned core after a crash without replacing its source.
+
+        Only exact expected module types and connections qualify. Incomplete or
+        ambiguous graphs use the existing cleanup/rebuild path.
+        """
+        import shlex
+        modules = [m for m in self.listing("modules") if self.owned(m)]
+        expected = {
+            "clips": ("module-null-sink", {f"sink_name={self.clips}", "rate=48000", "channels=2"}),
+            "mix": ("module-null-sink", {f"sink_name={self.mix}", "rate=48000", "channels=2"}),
+            "voice": ("module-null-sink", {f"sink_name={self.voice}", "rate=48000", "channels=2"}),
+            "source": ("module-remap-source", {f"source_name={self.source}", f"master={self.mix}.monitor"}),
+            "clips_mix": ("module-loopback", {f"source={self.clips}.monitor", f"sink={self.mix}"}),
+            "voice_mix": ("module-loopback", {f"source={self.voice}.monitor", f"sink={self.mix}"}),
+        }
+        found = {}
+        for key, (kind, tokens) in expected.items():
+            matches = [m for m in modules if m["name"] == kind and tokens.issubset(set(shlex.split(m.get("argument", ""))))]
+            if len(matches) != 1:
+                return False
+            found[key] = int(matches[0]["index"])
+        self.modules = found
+        # Normal is the service startup mode. Remove stale effects/AI routes,
+        # preserving core buses, source and the applications attached to them.
+        extras = [m for m in modules if int(m["index"]) not in found.values()]
+        extras.sort(key=lambda m: {"module-ladspa-sink": 1, "module-null-sink": 2}.get(m["name"], 0))
+        for module in extras:
+            self.call("unload-module", str(module["index"]))
+        return True
 
     def load(self, key, module, *args):
         self.modules[key] = int(self.call("load-module", module, *args))
@@ -116,7 +149,7 @@ class Routing:
             if props.get("resample.peaks") in (True, "true") or props.get("stream.monitor") in (True, "true"):
                 continue
             name = props.get("application.name")
-            if not name:
+            if not name or name == "Game Soundboard AI":
                 continue
             apps.append({"index": str(stream["index"]), "name": name,
                          "pid": str(props.get("application.process.id", "")),
@@ -137,7 +170,8 @@ class Routing:
 
     def reconcile(self, settings):
         if not self.initialized:
-            self.cleanup()
+            if not self.adopt():
+                self.cleanup()
             self.initialized = True
         modules = {int(m["index"]): m for m in self.listing("modules")}
         if any(i not in modules or not self.owned(modules[i]) for i in self.modules.values()):
@@ -146,7 +180,8 @@ class Routing:
         mic = settings["microphone"] if settings["microphone"] in {s["name"] for s in sources} else ""
         out = settings["output"] if settings["output"] in {s["name"] for s in sinks} else ""
         preset = settings.get("voice_effect", "normal")
-        signature = (mic, preset)
+        ai_mode = settings.get("_ai_mode", "normal")
+        signature = (mic, preset, ai_mode)
         monitors = (out if settings["monitor"] else "", out if settings.get("voice_monitor") else "")
         voice_error = ""
         rebuilt = False
@@ -155,7 +190,9 @@ class Routing:
                 rebuilt = True
                 for key, name, description in [("clips", self.clips, "Soundboard Clips"),
                                                 ("mix", self.mix, "Soundboard Voice Mix"),
-                                                ("voice", self.voice, "Soundboard Processed Voice")]:
+                                                ("voice", self.voice, "Soundboard Processed Voice"),
+                                                ("ai_input", self.ai_input, "Soundboard AI Input"),
+                                                ("ai_return", self.ai_return, "Soundboard AI Return")]:
                     self.load(key, "module-null-sink", f"sink_name={name}", "rate=48000", "channels=2",
                               description_property("sink", description))
                 self.load("source", "module-remap-source", f"master={self.mix}.monitor",
@@ -163,23 +200,34 @@ class Routing:
                           "channels=2", "channel_map=front-left,front-right")
                 self.loopback("clips_mix", self.clips + ".monitor", self.mix)
                 self.loopback("voice_mix", self.voice + ".monitor", self.mix)
+            # A pre-AI service's core can be adopted in place during upgrade.
+            for key, name, description in [("ai_input", self.ai_input, "Soundboard AI Input"),
+                                            ("ai_return", self.ai_return, "Soundboard AI Return")]:
+                if key not in self.modules:
+                    self.load(key, "module-null-sink", f"sink_name={name}", "rate=48000", "channels=2",
+                              description_property("sink", description))
             if signature != self.config:
-                self.unload("mic", "effect")
+                self.unload("mic", "effect", "ai_mic", "ai_voice")
                 self.config = None
                 try:
                     if mic:
                         target = self.voice
-                        if preset != "normal":
+                        if ai_mode in ("loading", "active"):
+                            self.loopback("ai_mic", mic, self.ai_input)
+                        if ai_mode == "active":
+                            self.loopback("ai_voice", self.ai_return + ".monitor", self.voice)
+                        elif preset != "normal":
                             self.load("effect", "module-ladspa-sink", f"sink_name={self.effect}",
                                       f"master={self.voice}", *effect_arguments(preset),
                                       "rate=48000", "channels=1", "channel_map=mono",
                                       description_property("sink", "Soundboard Voice Effect"))
                             target = self.effect
-                        self.loopback("mic", mic, target)
+                        if ai_mode != "active":
+                            self.loopback("mic", mic, target)
                     self.config = signature
                 except Exception as exc:
                     # Keep clips available, but never substitute an unprocessed mic.
-                    self.unload("mic", "effect")
+                    self.unload("mic", "effect", "ai_mic", "ai_voice")
                     voice_error = "Voice suspended: " + str(exc) + " · select Normal to bypass"
             if monitors != self.monitor_config:
                 self.unload("monitor", "voice_monitor")

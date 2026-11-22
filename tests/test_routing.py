@@ -68,7 +68,7 @@ def test_unplug_does_not_switch_mic_and_reconnect_rebuilds():
     assert 'mic' in router.modules
     pulse.modules.clear()  # server restart
     router.reconcile(settings())
-    assert len(pulse.modules) == 7
+    assert len(pulse.modules) == 9
 
 
 def test_load_failure_rolls_back_only_owned_modules():
@@ -90,7 +90,7 @@ def test_crash_leftovers_cleaned_but_other_instances_preserved():
     second = Routing('test', pulse)
     second.reconcile(settings())
     second.cleanup()
-    assert len(pulse.modules) == 7
+    assert len(pulse.modules) == 9
     assert all(other.owned(m) for m in pulse.modules.values())
 
 

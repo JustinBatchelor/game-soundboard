@@ -11,7 +11,8 @@ from pathlib import Path
 FORMATS = {".wav", ".mp3", ".ogg", ".flac"}
 DEFAULTS = {"master": 0.7, "mic_volume": 1.0, "mic_muted": False,
             "monitor": False, "microphone": "", "output": "", "stop_shortcut": "",
-            "voice_effect": "normal", "voice_monitor": False}
+            "voice_effect": "normal", "voice_monitor": False,
+            "ai_model": "", "ai_pitch": 0, "ai_profile": "responsive", "normal_shortcut": ""}
 
 
 def data_directory():
