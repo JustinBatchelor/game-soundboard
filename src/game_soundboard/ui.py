@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, Q
 from .playback import Playback
 from .routing import Routing
 from .shortcuts import Shortcuts
+from .keybinds import ShortcutRecorder, normalized_trigger
 from .starters import STARTERS, download_starter
 
 
@@ -119,6 +120,7 @@ class Window(QMainWindow):
         self.library = library
         self.live = live
         self.accepted = {}
+        self.shortcuts_paused = False
         self.pads = {}
         self.sources, self.sinks = [], []
         self.pending = 0
@@ -231,6 +233,8 @@ class Window(QMainWindow):
         self.playback.routes("", "")
 
     def trigger(self, ident):
+        if self.shortcuts_paused:
+            return
         if ident == "stop-all":
             self.playback.stop_all()
         else:
@@ -314,21 +318,30 @@ class Window(QMainWindow):
         if not value:
             return value
         if not re.fullmatch(r"(?:(?:CTRL|ALT|SHIFT|LOGO|NUM)\+)*[A-Za-z0-9_]+", value):
-            raise ValueError("Use XDG syntax, e.g. CTRL+ALT+k or F8. Leave empty to disable.")
-        if any(trigger == value and ident != current for ident, _, trigger in self.entries()):
+            raise ValueError("Record a key combination, or click Clear to disable the shortcut.")
+        if any(normalized_trigger(trigger) == normalized_trigger(value) and ident != current
+               for ident, _, trigger in self.entries()):
             raise ValueError("That shortcut is already assigned in this board.")
         return value
+
+    def exec_shortcut_dialog(self, dialog):
+        previous = self.shortcuts_paused
+        self.shortcuts_paused = True
+        try:
+            return dialog.exec()
+        finally:
+            self.shortcuts_paused = previous
 
     def edit(self, record):
         dialog = QDialog(self)
         dialog.setWindowTitle("Edit sound")
         form = QFormLayout(dialog)
         name = QLineEdit(record["name"])
-        key = QLineEdit(record["shortcut"])
-        key.setPlaceholderText("CTRL+ALT+k")
+        key = ShortcutRecorder(record["shortcut"])
         form.addRow("Name", name)
-        form.addRow("Preferred global keybind", key)
-        form.addRow(QLabel("The desktop approves the final binding. Blank disables it."))
+        form.addRow("Global keybind", key)
+        form.addRow(QLabel("Click the field and press your keys. Clear disables the shortcut.\n"
+                           "The desktop approves the binding. Shortcuts won’t play sounds while editing."))
         if record.get("source"):
             form.addRow(button("Open clip source", lambda: QDesktopServices.openUrl(QUrl(record["source"]))))
         remove = button("Remove sound", lambda: dialog.done(2), "stop")
@@ -336,7 +349,7 @@ class Window(QMainWindow):
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
         def save():
             try:
-                self.validate_shortcut(key.text(), record["id"])
+                self.validate_shortcut(key.trigger(), record["id"])
                 if not name.text().strip():
                     raise ValueError("Enter a name")
                 dialog.accept()
@@ -345,12 +358,12 @@ class Window(QMainWindow):
         buttons.accepted.connect(save)
         buttons.rejected.connect(dialog.reject)
         form.addRow(buttons)
-        result = dialog.exec()
+        result = self.exec_shortcut_dialog(dialog)
         if result == 2:
             self.playback.remove(record["id"])
             self.library.remove(record["id"])
         elif result == QDialog.DialogCode.Accepted:
-            record["name"], record["shortcut"] = name.text().strip(), key.text().strip()
+            record["name"], record["shortcut"] = name.text().strip(), key.trigger()
             self.library.save()
         else:
             return
@@ -376,8 +389,7 @@ class Window(QMainWindow):
             combo.setCurrentIndex(max(0, index))
             form.addRow(title, combo)
             combos[key] = combo
-        stop = QLineEdit(self.library.settings["stop_shortcut"])
-        stop.setPlaceholderText("e.g. CTRL+ALT+BackSpace")
+        stop = ShortcutRecorder(self.library.settings["stop_shortcut"])
         form.addRow("Stop All keybind", stop)
         info = QLabel("Assign sound keybinds using each card’s Edit button.\n"
                       "Select Soundboard Microphone inside your game/Discord.\n"
@@ -389,17 +401,17 @@ class Window(QMainWindow):
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
         def save():
             try:
-                self.validate_shortcut(stop.text(), "stop-all")
+                self.validate_shortcut(stop.trigger(), "stop-all")
                 dialog.accept()
             except ValueError as exc:
                 QMessageBox.warning(dialog, "Check shortcut", str(exc))
         buttons.accepted.connect(save)
         buttons.rejected.connect(dialog.reject)
         form.addRow(buttons)
-        if dialog.exec():
+        if self.exec_shortcut_dialog(dialog):
             for key, combo in combos.items():
                 self.library.settings[key] = combo.currentData()
-            self.library.settings["stop_shortcut"] = stop.text().strip()
+            self.library.settings["stop_shortcut"] = stop.trigger()
             self.library.save()
             if self.router:
                 self.router.update(self.library.settings)

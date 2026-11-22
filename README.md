@@ -7,7 +7,7 @@ A native Linux soundboard for Ubuntu/GNOME on Wayland. Trigger imported clips fr
 Requires Linux with PipeWire/PulseAudio compatibility, Python 3.12 or later, and a desktop implementing the XDG GlobalShortcuts portal. The initial target is Ubuntu with GNOME on Wayland.
 
 ```bash
-sudo apt install git python3-venv pulseaudio-utils
+sudo apt install git python3-venv pulseaudio-utils libxkbcommon0
 git clone https://github.com/JustinBatchelor/game-soundboard.git
 cd game-soundboard
 ./setup.sh
@@ -24,8 +24,8 @@ The setup script uses `uv` when available, otherwise Python's venv/pip. FFmpeg i
 2. In your game or Discord, select **Soundboard Microphone** as the input. System defaults are never changed by this app.
 3. Click a sound button to send it to voice chat. Enable **Hear clips locally** to also hear triggered clips in your headset.
 4. **Preview** plays only to your selected headset, never into voice chat.
-5. Use a card's **Edit** button to assign a keybind, for example `CTRL+ALT+k`, `CTRL+ALT+o`, or `F8`. Save and approve the desktop's shortcut dialog. The card displays the desktop's accepted binding.
-6. Assign Stop All in settings. Stop All stops clips and previews; your voice remains connected. **Mute voice** mutes only the app's microphone route.
+5. Use a card's **Edit** button, click the keybind field, and press your desired combination (for example **Ctrl+Alt+K** or **F8**). Use **Clear** to disable it. Save and approve the desktop's shortcut dialog. The card displays the desktop's accepted binding.
+6. Record the Stop All keybind the same way in settings. Global shortcut playback is paused while either settings dialog is open, so recording keys does not trigger sounds. Stop All stops clips and previews; your voice remains connected. **Mute voice** mutes only the app's microphone route.
 
 Different clips overlap. Repeating a clip restarts it. Minimize to keep running; close to quit and remove the virtual devices. Games can require reselecting their microphone after restarting the app. Game push-to-talk still applies, and noise suppression can filter clips. The app does not press a game's push-to-talk key.
 
@@ -79,7 +79,7 @@ The remaining user acceptance checks are approving chosen keybinds, triggering t
 
 ### Validation results
 
-- 17 automated tests passed: import persistence and conversion, failed imports/downloads, seed history, reorder/removal, routing ownership, module rollback/recovery, disconnected devices, global shortcut signal handling, denial, and session revocation, and audio replacement preserving button settings.
+- 44 automated tests pass, covering key capture and conversion, binding preservation, duplicate detection, playback suppression while editing, library imports and persistence, routing recovery, and shortcut session handling.
 - Live portal registration and session creation succeeded. The test did not assign/grab any keyboard combination.
 - Live synthetic audio verified overlapping clips plus voice in the virtual microphone, preview isolation, monitoring without voice feedback, microphone mute, and Stop All preserving voice.
 - Warm trigger-to-capture measured about 42 ms in the synthetic test on the current desktop. Fullscreen-game keybind timing and network/voice-chat processing remain unmeasured.
