@@ -82,6 +82,11 @@ First launch imports missing starters; **Get starter clips** retries failed down
 - [CSGO/CS2 — Bomb has been defused](https://www.myinstants.com/en/instant/cs-go-bomb-has-been-defused-95024/)
 - [SpongeBob — Oh brother, this guy stinks!](https://www.myinstants.com/en/instant/oh-brother-this-guy-stinks/)
 - [Fahh — meme sound effect](https://www.youtube.com/watch?v=VP6eZu3SAak)
+- [Vine Boom](https://www.myinstants.com/en/instant/vine-boom-sound-70972/)
+- [Bruh](https://www.myinstants.com/en/instant/bruh/)
+- [SpongeBob Fail](https://www.myinstants.com/en/instant/spongebob-fail-11236/)
+- [The Saxophones Getting Louder](https://www.myinstants.com/en/instant/the-saxophones-getting-louder-61232/)
+- [This is Rocket League!](https://www.myinstants.com/en/instant/this-is-rocket-league-94006/)
 
 These third-party recordings are downloaded into your local library, not included in this repository. Kaboom uses the linked Black Ops video; yt-dlp retrieves its audio. Original source and download URLs are retained in each record. Audio is not bundled in source distributions. Import your preferred recording if an upload differs from the version you want. Downloads are bounded and time out; failures do not prevent local imports or playback. All imported audio works offline afterward.
 

@@ -16,6 +16,11 @@ STARTERS = [
     ("oh-yeah", "Oh Yeah!", "https://www.myinstants.com/en/instant/oh-yeah-kool-aid-man-35548/"),
     ("this-guy-stinks", "Oh brother, this guy stinks!", "https://www.myinstants.com/en/instant/oh-brother-this-guy-stinks/"),
     ("fahh", "Fahh", "https://www.youtube.com/watch?v=VP6eZu3SAak"),
+    ("vine-boom", "Vine Boom", "https://www.myinstants.com/en/instant/vine-boom-sound-70972/"),
+    ("bruh", "Bruh", "https://www.myinstants.com/en/instant/bruh/"),
+    ("spongebob-fail", "SpongeBob Fail", "https://www.myinstants.com/en/instant/spongebob-fail-11236/"),
+    ("saxophones-getting-louder", "The Saxophones Getting Louder", "https://www.myinstants.com/en/instant/the-saxophones-getting-louder-61232/"),
+    ("this-is-rocket-league", "This is Rocket League!", "https://www.myinstants.com/en/instant/this-is-rocket-league-94006/"),
 ]
 
 
