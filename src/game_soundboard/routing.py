@@ -5,6 +5,12 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+from .voice_effects import PRESETS, effect_arguments
+
+
+def description_property(kind, text):
+    # Module arguments and property lists are parsed separately by the server.
+    return f'{kind}_properties=\'device.description="{text}"\''
 
 
 def pactl_binary():
@@ -23,9 +29,12 @@ class Routing:
         self.clips = self.prefix + "_clips"
         self.mix = self.prefix + "_mix"
         self.source = self.prefix + "_microphone"
+        self.voice = self.prefix + "_voice"
+        self.effect = self.prefix + "_effect"
         self.run_override = run
         self.modules = {}
         self.config = None
+        self.monitor_config = None
         self.initialized = False
 
     def call(self, *args):
@@ -55,15 +64,17 @@ class Routing:
             tokens = shlex.split(module.get("argument", ""))
         except ValueError:
             return False
-        return any(t in tokens for t in [f"sink_name={self.clips}", f"sink_name={self.mix}",
-            f"source_name={self.source}", f"sink={self.clips}", f"sink={self.mix}",
-            f"source={self.clips}.monitor"])
+        sinks = (self.clips, self.mix, self.voice, self.effect)
+        owned_tokens = [f"{key}={sink}" for sink in sinks for key in ("sink_name", "sink")]
+        owned_tokens += [f"source_name={self.source}", f"source={self.clips}.monitor",
+                         f"source={self.voice}.monitor"]
+        return any(t in tokens for t in owned_tokens)
 
     def cleanup(self):
         try:
             owned = [m for m in self.listing("modules") if self.owned(m)]
-            # Connections and remap source go before the two sinks.
-            owned.sort(key=lambda m: m["name"] == "module-null-sink")
+            # Disconnect streams before effects, and effects before buses.
+            owned.sort(key=lambda m: {"module-ladspa-sink": 1, "module-null-sink": 2}.get(m["name"], 0))
             for module in owned:
                 try:
                     self.call("unload-module", str(module["index"]))
@@ -72,6 +83,7 @@ class Routing:
         finally:
             self.modules.clear()
             self.config = None
+            self.monitor_config = None
 
     def load(self, key, module, *args):
         self.modules[key] = int(self.call("load-module", module, *args))
@@ -83,6 +95,43 @@ class Routing:
         sinks = [s for s in self.listing("sinks") if not s["name"].startswith("gsb_")]
         return sources, sinks
 
+    def unload(self, *keys):
+        for key in keys:
+            if key in self.modules:
+                self.call("unload-module", str(self.modules[key]))
+                del self.modules[key]
+
+    def loopback(self, key, source, sink):
+        self.load(key, "module-loopback", f"source={source}", f"sink={sink}",
+                  "source_dont_move=true", "sink_dont_move=true", "latency_msec=20")
+
+    def capture_apps(self):
+        sources = {str(s["index"]): s["name"] for s in self.listing("sources") if "index" in s}
+        apps = []
+        for stream in self.listing("source-outputs"):
+            props = stream.get("properties", {})
+            # Module loopbacks/remaps are routing infrastructure, not game inputs.
+            if stream.get("owner_module") not in (None, "", 4294967295, "4294967295"):
+                continue
+            if props.get("resample.peaks") in (True, "true") or props.get("stream.monitor") in (True, "true"):
+                continue
+            name = props.get("application.name")
+            if not name:
+                continue
+            apps.append({"index": str(stream["index"]), "name": name,
+                         "pid": str(props.get("application.process.id", "")),
+                         "source": sources.get(str(stream.get("source")), ""),
+                         "connected": sources.get(str(stream.get("source"))) == self.source})
+        return apps
+
+    def connect_app(self, requested):
+        # Revalidate identity: an input can disappear while the dialog is open.
+        current = next((a for a in self.capture_apps() if all(a[k] == requested[k]
+                       for k in ("index", "name", "pid"))), None)
+        if not current:
+            raise RuntimeError("That application's input closed. Open its microphone test and try again.")
+        self.call("move-source-output", current["index"], self.source)
+
     def reconcile(self, settings):
         if not self.initialized:
             self.cleanup()
@@ -93,37 +142,69 @@ class Routing:
         sources, sinks = self.devices()
         mic = settings["microphone"] if settings["microphone"] in {s["name"] for s in sources} else ""
         out = settings["output"] if settings["output"] in {s["name"] for s in sinks} else ""
-        signature = (mic, out if settings["monitor"] else "")
+        preset = settings.get("voice_effect", "normal")
+        signature = (mic, preset)
+        monitors = (out if settings["monitor"] else "", out if settings.get("voice_monitor") else "")
+        voice_error = ""
         try:
             if "clips" not in self.modules:
                 for key, name, description in [("clips", self.clips, "Soundboard Clips"),
-                                                ("mix", self.mix, "Soundboard Voice Mix")]:
+                                                ("mix", self.mix, "Soundboard Voice Mix"),
+                                                ("voice", self.voice, "Soundboard Processed Voice")]:
                     self.load(key, "module-null-sink", f"sink_name={name}", "rate=48000", "channels=2",
-                              f"sink_properties=device.description='{description}'")
+                              description_property("sink", description))
                 self.load("source", "module-remap-source", f"master={self.mix}.monitor",
-                          f"source_name={self.source}", "source_properties=device.description='Soundboard Microphone'",
+                          f"source_name={self.source}", description_property("source", "Soundboard Microphone"),
                           "channels=2", "channel_map=front-left,front-right")
-                self.load("clips_mix", "module-loopback", f"source={self.clips}.monitor", f"sink={self.mix}",
-                          "source_dont_move=true", "sink_dont_move=true", "latency_msec=20")
+                self.loopback("clips_mix", self.clips + ".monitor", self.mix)
+                self.loopback("voice_mix", self.voice + ".monitor", self.mix)
             if signature != self.config:
-                for key in ("mic", "monitor"):
-                    if key in self.modules:
-                        self.call("unload-module", str(self.modules.pop(key)))
-                if mic:
-                    self.load("mic", "module-loopback", f"source={mic}", f"sink={self.mix}",
-                              "source_dont_move=true", "sink_dont_move=true", "latency_msec=20")
-                if signature[1]:
-                    self.load("monitor", "module-loopback", f"source={self.clips}.monitor", f"sink={out}",
-                              "source_dont_move=true", "sink_dont_move=true", "latency_msec=20")
-                self.config = signature
+                self.unload("mic", "effect")
+                self.config = None
+                try:
+                    if mic:
+                        target = self.voice
+                        if preset != "normal":
+                            self.load("effect", "module-ladspa-sink", f"sink_name={self.effect}",
+                                      f"master={self.voice}", *effect_arguments(preset),
+                                      "rate=48000", "channels=1", "channel_map=mono",
+                                      description_property("sink", "Soundboard Voice Effect"))
+                            target = self.effect
+                        self.loopback("mic", mic, target)
+                    self.config = signature
+                except Exception as exc:
+                    # Keep clips available, but never substitute an unprocessed mic.
+                    self.unload("mic", "effect")
+                    voice_error = "Voice suspended: " + str(exc) + " · select Normal to bypass"
+            if monitors != self.monitor_config:
+                self.unload("monitor", "voice_monitor")
+                if monitors[0]:
+                    self.loopback("monitor", self.clips + ".monitor", out)
+                if monitors[1]:
+                    self.loopback("voice_monitor", self.voice + ".monitor", out)
+                self.monitor_config = monitors
+            # Gain and mute are post-effect, affecting chat and optional self-monitoring.
+            voice_modules = {str(self.modules[k]) for k in ("voice_mix", "voice_monitor") if k in self.modules}
             for stream in self.listing("sink-inputs"):
-                if "mic" in self.modules and str(stream.get("owner_module")) == str(self.modules["mic"]):
+                if str(stream.get("owner_module")) in voice_modules:
                     self.call("set-sink-input-volume", str(stream["index"]), f'{round(settings["mic_volume"] * 100)}%')
                     self.call("set-sink-input-mute", str(stream["index"]), "1" if settings["mic_muted"] else "0")
         except Exception:
             self.cleanup()
             raise
+        apps = self.capture_apps()
+        connected = sorted({a["name"] for a in apps if a["connected"]})
+        mic_label = next((s.get("description", s["name"]) for s in sources if s["name"] == mic), "Disconnected")
+        messages = ["Mic: " + mic_label,
+                    "Effect: " + PRESETS.get(preset, (preset,))[0],
+                    "Receiving apps: " + ", ".join(connected) if connected else
+                    "No app is using Soundboard Microphone · select it in your game or use Connect app"]
+        if voice_error:
+            messages.append(voice_error)
+        if settings["mic_muted"]:
+            messages.append("Voice muted")
+        if not out:
+            messages.append("Headphones disconnected")
         return {"sources": sources, "sinks": sinks, "clip_sink": self.clips,
-                "output": out, "microphone": mic,
-                "message": "Virtual microphone ready" + (" · microphone disconnected" if not mic else "")
-                           + (" · headphones disconnected" if not out else "")}
+                "output": out, "microphone": mic, "capture_apps": apps,
+                "voice_error": voice_error, "message": " · ".join(messages)}

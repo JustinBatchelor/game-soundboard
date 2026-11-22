@@ -39,14 +39,14 @@ def tone(path, frequency):
         file.writeframes(data)
 
 
-def spectrum(path):
+def spectrum(path, frequencies=(440, 660, 880, 1320)):
     data = path.read_bytes()
     usable = len(data) // 4 * 4
     data = data[max(0, usable - 48000):usable]  # last quarter second, stereo int16
     samples = struct.unpack('<' + 'h' * (len(data)//2), data)[::2]
     assert samples, 'No recorded samples'
     values = {}
-    for frequency in [440, 660, 880, 1320]:
+    for frequency in frequencies:
         real = sum(x * math.cos(2 * math.pi * frequency * i / 48000) for i, x in enumerate(samples))
         imag = sum(x * math.sin(2 * math.pi * frequency * i / 48000) for i, x in enumerate(samples))
         values[frequency] = round(2 * math.hypot(real, imag) / len(samples), 1)
@@ -63,6 +63,8 @@ try:
             'master=gsbtest_micfeed.monitor', 'source_name=synthetic_soundboard_test_mic')))
         settings = dict(DEFAULTS, microphone='synthetic_soundboard_test_mic', output='gsbtest_headphones', monitor=True)
         router.reconcile(settings)
+        assert next(s for s in router.listing('sources') if s['name'] == router.source)['description'] == 'Soundboard Microphone'
+        assert next(s for s in router.listing('sinks') if s['name'] == router.clips)['description'] == 'Soundboard Clips'
         lib = Library(root / 'library')
         lib.settings.update(settings)
         records = []
@@ -87,12 +89,18 @@ try:
         playback.effect(records[2], True)
         pump(.5)
         assert all(e.status() == QSoundEffect.Ready for e in list(playback.effects.values()) + list(playback.preview_effects.values()) + [mic])
-        for name, source in [('mix', router.source), ('headphones', 'gsbtest_headphones.monitor')]:
+        for name, source in [('mix', 'synthetic_soundboard_test_mic'), ('headphones', 'gsbtest_headphones.monitor')]:
             path = root / f'{name}.pcm'
             file = path.open('wb')
             process = subprocess.Popen([str(Path(pactl_binary()).with_name('parec')), '--raw', '--format=s16le',
                 '--rate=48000', '--channels=2', '--latency-msec=20', '--device=' + source], stdout=file, stderr=subprocess.PIPE)
             recorders.append((process, file))
+        pump(.3)
+        # Exercise the same stream move as Connect app, on our recorder only.
+        test_app = next(a for a in router.capture_apps() if a['pid'] == str(recorders[0][0].pid))
+        assert not test_app['connected']
+        router.connect_app(test_app)
+        assert next(a for a in router.capture_apps() if a['index'] == test_app['index'])['connected']
         pump(.3)
         start_offset = (root / 'mix.pcm').stat().st_size
         started = time.monotonic()
@@ -134,6 +142,53 @@ try:
         assert mix[880] > 100 and all(mix[f] < 30 for f in [440, 660, 1320])
         assert all(v < 30 for v in headphones.values())
         print('PASS: voice mute and Stop All preserve intended routes', flush=True)
+        source_module = router.modules['source']
+        playback.effects[records[0]['id']].setLoopCount(QSoundEffect.Infinite.value)
+        playback.play(records[0]['id'])
+        for preset, shifted in [('baby', [880 * 2 ** (8/12)]),
+                                ('deep', [880 * 2 ** (-6/12)]),
+                                ('robot', [835, 925]), ('radio', [880])]:
+            settings.update(voice_effect=preset, voice_monitor=True)
+            state = router.reconcile(settings)
+            assert not state['voice_error'], state['voice_error']
+            assert router.modules['source'] == source_module
+            pump(1.5)
+            values = spectrum(root / 'mix.pcm', [440, 880] + shifted)
+            headphones = spectrum(root / 'headphones.pcm', [440] + shifted)
+            print(f'{preset}: {values}', flush=True)
+            assert values[440] > 100, 'Clips must bypass the voice effect'
+            if not all(values[f] > 100 and headphones[f] > 100 for f in shifted):
+                print('Headphones:', headphones, 'Synthetic mic playing:', mic.isPlaying(), flush=True)
+                print('Owned streams:', [{k: s.get(k) for k in ('index', 'sink', 'owner_module', 'mute', 'volume')} for s in router.listing('sink-inputs')
+                      if str(s.get('owner_module')) in {str(i) for i in router.modules.values()}], flush=True)
+            assert all(values[f] > 100 and headphones[f] > 100 for f in shifted)
+            if preset != 'radio':
+                assert values[880] < 50, 'Unprocessed microphone leaked into mix'
+        # Radio suppresses low rumble/high hiss while retaining speech frequencies.
+        playback.stop_all()
+        for frequency in (80, 8000):
+            mic.stop()
+            path = root / f'radio-{frequency}.wav'
+            tone(path, frequency)
+            mic.setSource(QUrl.fromLocalFile(str(path)))
+            pump(.2)
+            mic.play()
+            settings['voice_effect'] = 'normal'
+            router.reconcile(settings)
+            pump(.7)
+            original = spectrum(root / 'mix.pcm', [frequency])[frequency]
+            settings['voice_effect'] = 'radio'
+            router.reconcile(settings)
+            pump(.7)
+            filtered = spectrum(root / 'mix.pcm', [frequency])[frequency]
+            print(f'Radio rejection at {frequency} Hz: {original} -> {filtered}', flush=True)
+            assert original > 100 and filtered < original * .15
+        settings['mic_muted'] = True
+        router.reconcile(settings)
+        pump(.5)
+        assert spectrum(root / 'mix.pcm', [8000])[8000] < 30
+        assert spectrum(root / 'headphones.pcm', [8000])[8000] < 30
+        print('PASS: presets process voice only; monitoring and mute work; source stays stable', flush=True)
         playback.stop_all()
         mic.stop()
 finally:

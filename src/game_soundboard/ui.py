@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, Q
     QSlider, QCheckBox, QComboBox, QDialog, QFormLayout, QDialogButtonBox)
 from .playback import Playback
 from .routing import Routing
+from .voice_effects import PRESETS
 from .shortcuts import Shortcuts
 from .keybinds import ShortcutRecorder, normalized_trigger
 from .starters import STARTERS, download_starter
@@ -20,11 +21,13 @@ from .starters import STARTERS, download_starter
 class RoutingWorker(QObject):
     result = Signal(dict)
     error = Signal(str)
+    connected = Signal(str)
 
     def __init__(self, library):
         super().__init__()
         self.router = Routing(library.root)
         self.settings = copy.deepcopy(library.settings)
+        self.connect_requests = []
         self.lock = threading.Lock()
         self.wake = threading.Event()
         self.stopping = threading.Event()
@@ -33,6 +36,11 @@ class RoutingWorker(QObject):
     def update(self, settings):
         with self.lock:
             self.settings = copy.deepcopy(settings)
+        self.wake.set()
+
+    def connect_app(self, app):
+        with self.lock:
+            self.connect_requests.append(dict(app))
         self.wake.set()
 
     def run(self):
@@ -52,6 +60,16 @@ class RoutingWorker(QObject):
                     with self.lock:
                         self.settings.update({k: settings[k] for k in ("microphone", "output", "devices_initialized")})
                 state = self.router.reconcile(settings)
+                with self.lock:
+                    requests, self.connect_requests = self.connect_requests, []
+                for requested in requests:
+                    try:
+                        self.router.connect_app(requested)
+                        self.connected.emit(requested["name"] + " connected to Soundboard Microphone")
+                    except Exception as exc:
+                        self.connected.emit("Could not connect app: " + str(exc))
+                if requests:
+                    state = self.router.reconcile(settings)
                 state["initial_settings"] = initial
                 self.result.emit(state)
             except Exception as exc:
@@ -123,6 +141,7 @@ class Window(QMainWindow):
         self.shortcuts_paused = False
         self.pads = {}
         self.sources, self.sinks = [], []
+        self.capture_apps = []
         self.pending = 0
         self.pending_seeds = set()
         self.executor = ThreadPoolExecutor(max_workers=1)
@@ -158,7 +177,10 @@ class Window(QMainWindow):
         layout.addLayout(header)
         hint = QLabel('In your game or Discord, select “Soundboard Microphone” as the input device.')
         hint.setWordWrap(True)
-        layout.addWidget(hint)
+        input_row = QHBoxLayout()
+        input_row.addWidget(hint, 1)
+        input_row.addWidget(button("Connect app", self.connect_app_dialog))
+        layout.addLayout(input_row)
         toolbar = QHBoxLayout()
         self.search = QLineEdit()
         self.search.setPlaceholderText("Search sounds…  ·  or drop audio files here")
@@ -191,6 +213,20 @@ class Window(QMainWindow):
         monitor.toggled.connect(lambda v: self.setting("monitor", v))
         controls.addWidget(monitor)
         layout.addLayout(controls)
+        effects = QHBoxLayout()
+        effects.addWidget(QLabel("Voice effect"))
+        self.voice_effect = QComboBox()
+        for key, preset in PRESETS.items():
+            self.voice_effect.addItem(preset[0], key)
+        self.voice_effect.setCurrentIndex(max(0, self.voice_effect.findData(library.settings["voice_effect"])))
+        self.voice_effect.currentIndexChanged.connect(lambda: self.setting("voice_effect", self.voice_effect.currentData()))
+        effects.addWidget(self.voice_effect, 1)
+        self.voice_monitor = QCheckBox("Hear my voice")
+        self.voice_monitor.setToolTip("Hear the processed microphone through your selected headphones. Adds a short delay; use headphones to avoid feedback.")
+        self.voice_monitor.setChecked(library.settings["voice_monitor"])
+        self.voice_monitor.toggled.connect(lambda value: self.setting("voice_monitor", value))
+        effects.addWidget(self.voice_monitor)
+        layout.addLayout(effects)
         self.audio_status = QLabel("Connecting audio…" if live else "Preview mode · audio routing disabled")
         self.shortcut_status = QLabel("No global shortcuts assigned")
         self.feedback = QLabel("Ready · WAV, MP3, OGG and FLAC")
@@ -202,6 +238,7 @@ class Window(QMainWindow):
         if live:
             self.router.result.connect(self.routed)
             self.router.error.connect(self.routing_error)
+            self.router.connected.connect(self.notice)
             self.shortcuts.activated.connect(self.trigger)
             self.shortcuts.status.connect(self.shortcut_status.setText)
             self.shortcuts.bindings.connect(self.binding_labels)
@@ -225,12 +262,38 @@ class Window(QMainWindow):
                 self.library.settings[key] = state["initial_settings"][key]
             self.library.save()
         self.sources, self.sinks = state["sources"], state["sinks"]
+        self.capture_apps = state.get("capture_apps", [])
         self.audio_status.setText(state["message"])
         self.playback.routes(state["clip_sink"], state["output"])
 
     def routing_error(self, text):
+        self.capture_apps = []
         self.audio_status.setText("Audio unavailable: " + text)
         self.playback.routes("", "")
+
+    def connect_app_dialog(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Connect an application's microphone")
+        form = QFormLayout(dialog)
+        choices = QComboBox()
+        for app in self.capture_apps:
+            suffix = " · already connected" if app["connected"] else " · using another input"
+            choices.addItem(app["name"] + suffix, app)
+        form.addRow("Recording app", choices)
+        info = QLabel("Open your game's microphone test if it is missing here.\n"
+                      "Connect sends your voice and clips to this active input.\n"
+                      "For future sessions, select Soundboard Microphone in the game.\n"
+                      "Push-to-talk and the game's voice settings still apply.")
+        info.setWordWrap(True)
+        form.addRow(info)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Connect")
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setEnabled(bool(self.capture_apps) and bool(self.router))
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        form.addRow(buttons)
+        if self.exec_shortcut_dialog(dialog) and self.router and choices.currentData():
+            self.router.connect_app(choices.currentData())
 
     def trigger(self, ident):
         if self.shortcuts_paused:

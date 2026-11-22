@@ -29,7 +29,12 @@ window.show()
 failures = []
 def verify():
     try:
-        assert 'ready' in window.audio_status.text(), window.audio_status.text()
+        assert 'No app is using Soundboard Microphone' in window.audio_status.text(), window.audio_status.text()
+        assert window.voice_effect.count() == 5
+        assert not window.voice_monitor.isChecked()
+        window.voice_effect.setCurrentIndex(window.voice_effect.findData('robot'))
+        assert Library(library.root).settings['voice_effect'] == 'robot'
+        window.voice_effect.setCurrentIndex(0)
         assert window.playback.clip_device is not None
         assert window.playback.output_device is not None
         assert window.library.settings['microphone']

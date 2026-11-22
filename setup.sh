@@ -13,4 +13,6 @@ fi
 if ! command -v pactl >/dev/null && ! test -x .runtime/usr/bin/pactl; then
     echo 'Install the audio control utility: sudo apt install pulseaudio-utils'
 fi
+printf '\nOptional live voice effects: sudo apt install rubberband-ladspa swh-plugins\n'
+printf 'Baby/Helium and Deep voice require rubberband-ladspa version 4.0 or newer.\n'
 printf '\nLaunch Game Soundboard from your applications menu, or run ./run.sh\n'
