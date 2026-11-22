@@ -14,6 +14,7 @@ STARTERS = [
     ("kaboom", "Kaboom!", "https://www.youtube.com/watch?v=UO9JSE3aRtw"),
     ("oh-yeah", "Oh Yeah!", "https://www.myinstants.com/en/instant/oh-yeah-kool-aid-man-35548/"),
     ("this-guy-stinks", "Oh brother, this guy stinks!", "https://www.myinstants.com/en/instant/oh-brother-this-guy-stinks/"),
+    ("fahh", "Fahh", "https://www.youtube.com/watch?v=VP6eZu3SAak"),
 ]
 
 

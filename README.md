@@ -39,6 +39,7 @@ First launch imports missing starters; **Get starter clips** retries failed down
 - [Kool-Aid Man — Oh Yeah!](https://www.myinstants.com/en/instant/oh-yeah-kool-aid-man-35548/)
 - [CSGO/CS2 — Bomb has been planted](https://www.myinstants.com/en/instant/bomb-has-been-planted-csgo-cs2-75763/)
 - [SpongeBob — Oh brother, this guy stinks!](https://www.myinstants.com/en/instant/oh-brother-this-guy-stinks/)
+- [Fahh — meme sound effect](https://www.youtube.com/watch?v=VP6eZu3SAak)
 
 These third-party recordings are downloaded into your local library, not included in this repository. Kaboom uses the linked Black Ops video; yt-dlp retrieves its audio. Original source and download URLs are retained in each record. Audio is not bundled in source distributions. Import your preferred recording if an upload differs from the version you want. Downloads are bounded and time out; failures do not prevent local imports or playback. All imported audio works offline afterward.
 
