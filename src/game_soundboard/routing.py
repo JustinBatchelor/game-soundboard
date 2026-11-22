@@ -121,15 +121,18 @@ class Routing:
             apps.append({"index": str(stream["index"]), "name": name,
                          "pid": str(props.get("application.process.id", "")),
                          "source": sources.get(str(stream.get("source")), ""),
+                         "requested_source": str(props.get("target.object", "")),
                          "connected": sources.get(str(stream.get("source"))) == self.source})
         return apps
 
-    def connect_app(self, requested):
+    def connect_app(self, requested, *, restore=False):
         # Revalidate identity: an input can disappear while the dialog is open.
         current = next((a for a in self.capture_apps() if all(a[k] == requested[k]
                        for k in ("index", "name", "pid"))), None)
         if not current:
             raise RuntimeError("That application's input closed. Open its microphone test and try again.")
+        if restore and (current.get("requested_source") != self.source or current["connected"]):
+            return
         self.call("move-source-output", current["index"], self.source)
 
     def reconcile(self, settings):
@@ -146,8 +149,10 @@ class Routing:
         signature = (mic, preset)
         monitors = (out if settings["monitor"] else "", out if settings.get("voice_monitor") else "")
         voice_error = ""
+        rebuilt = False
         try:
             if "clips" not in self.modules:
+                rebuilt = True
                 for key, name, description in [("clips", self.clips, "Soundboard Clips"),
                                                 ("mix", self.mix, "Soundboard Voice Mix"),
                                                 ("voice", self.voice, "Soundboard Processed Voice")]:
@@ -193,6 +198,19 @@ class Routing:
             self.cleanup()
             raise
         apps = self.capture_apps()
+        reconnect_errors = []
+        if rebuilt:
+            # Native PipeWire clients (including CS2/SDL) can keep requesting our
+            # named device while WirePlumber parks them on a fallback after exit.
+            # Restore that request when the device returns. Do not police moves
+            # on later health checks or take over apps requesting another input.
+            for app in apps:
+                if app["requested_source"] == self.source and not app["connected"]:
+                    try:
+                        self.connect_app(app, restore=True)
+                    except RuntimeError as exc:
+                        reconnect_errors.append(f'Could not reconnect {app["name"]}: {exc} · use Connect app')
+            apps = self.capture_apps()
         connected = sorted({a["name"] for a in apps if a["connected"]})
         mic_label = next((s.get("description", s["name"]) for s in sources if s["name"] == mic), "Disconnected")
         messages = ["Mic: " + mic_label,
@@ -205,6 +223,7 @@ class Routing:
             messages.append("Voice muted")
         if not out:
             messages.append("Headphones disconnected")
+        messages.extend(reconnect_errors)
         return {"sources": sources, "sinks": sinks, "clip_sink": self.clips,
                 "output": out, "microphone": mic, "capture_apps": apps,
                 "voice_error": voice_error, "message": " · ".join(messages)}

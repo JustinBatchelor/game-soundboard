@@ -37,6 +37,8 @@ Older Ubuntu releases may ship Rubber Band 3.x without the live pitch plugin. No
 
 Different clips overlap. Repeating a clip restarts it. Minimize to keep running; close to quit and remove the virtual devices. Games can require reselecting their microphone after restarting the app. Game push-to-talk still applies, and noise suppression can filter clips. The app does not press a game's push-to-talk key.
 
+When the virtual microphone is recreated, the app reconnects existing native recording streams that still explicitly request its device name but were moved to a fallback input. This recovery runs when rebuilding the audio graph; it does not override later manual input changes or move apps requesting another microphone. If a game has closed its capture stream entirely, reopen its microphone test or restart the game with the soundboard running.
+
 ## Live voice effects and microphone checks
 
 Choose **Normal**, **Baby / Helium** (+8 semitones), **Deep voice** (−6 semitones), **Robot**, or **Radio** from the panel. These are local microphone effects; clip playback is unchanged. Normal is the default. Switching presets preserves the public microphone device and its connected applications. Missing or failed effects suspend the microphone route and display an error while keeping clips available; choose Normal to restore unprocessed voice.
@@ -93,10 +95,13 @@ Owned module names include a hash of the library path. Normal exit removes them;
 .venv/bin/python -m pytest -q
 PYTHONPATH=src QT_QPA_PLATFORM=offscreen .venv/bin/python scripts/probe-live.py
 PYTHONPATH=src QT_QPA_PLATFORM=offscreen .venv/bin/python scripts/test-live-audio.py
+PYTHONPATH=src .venv/bin/python scripts/test-reconnect-live.py
 ./run.sh --screenshot /tmp/soundboard.png
 ```
 
 Live probes require access to your real desktop session, PipeWire, and the installed launcher. The audio test uses temporary null sinks and synthetic tones, never the physical microphone or headphones. Run live probes outside a restrictive sandbox. `parec` from `pulseaudio-utils` is needed for the audio test.
+
+The restart recovery test also uses `pw-record` from `pipewire-bin`, restricted to silent synthetic sources, and checks that explicit device requests recover without changing system defaults or fighting later manual input changes.
 
 The remaining user acceptance checks are approving chosen keybinds, triggering them while a fullscreen game has focus, selecting the virtual input in that game, checking perceived volume, and measuring end-to-end trigger latency under gaming load. The under-100-ms figure is a target, not a guarantee. Native Linux games and other applications may handle device changes and voice processing differently.
 

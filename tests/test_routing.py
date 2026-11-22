@@ -192,3 +192,75 @@ def test_capture_status_distinguishes_game_from_module_streams():
     apps = router.capture_apps()
     assert [(a['name'], a['connected']) for a in apps] == [('cs2', True), ('Discord', False)]
     assert 'Receiving apps: cs2' in router.reconcile(settings())['message']
+
+
+class CapturePulse(Pulse):
+    def __init__(self, source):
+        super().__init__()
+        self.sources = [{'index': 1, 'name': 'physical-mic'}, {'index': 2, 'name': source}]
+        self.streams = [
+            {'index': 10, 'source': 1, 'owner_module': None,
+             'properties': {'application.name': 'cs2', 'target.object': source}},
+            {'index': 11, 'source': 1, 'owner_module': None,
+             'properties': {'application.name': 'Another game', 'target.object': 'physical-mic'}}]
+        self.move_fails = False
+
+    def __call__(self, *args):
+        if args[-1] == 'source-outputs':
+            return json.dumps(self.streams)
+        if args[0] == 'move-source-output':
+            self.calls.append(args)
+            if self.move_fails:
+                raise RuntimeError('input closed')
+            next(s for s in self.streams if str(s['index']) == args[1])['source'] = 2
+            return ''
+        return super().__call__(*args)
+
+
+def test_startup_restores_only_apps_requesting_this_microphone():
+    router = Routing('test')
+    pulse = CapturePulse(router.source)
+    router.run_override = pulse
+    state = router.reconcile(settings())
+    assert [s['source'] for s in pulse.streams] == [2, 1]
+    assert 'Receiving apps: cs2' in state['message']
+    assert [c for c in pulse.calls if c[0] == 'move-source-output'] == [
+        ('move-source-output', '10', router.source)]
+    # A deliberate move during normal operation must not be fought by health checks.
+    pulse.streams[0]['source'] = 1
+    router.reconcile(settings())
+    assert pulse.streams[0]['source'] == 1
+    # After loss/recreation of our device, restore the declared target again.
+    pulse.modules.clear()
+    router.reconcile(settings())
+    assert pulse.streams[0]['source'] == 2
+
+
+def test_restore_failure_keeps_audio_graph_available():
+    router = Routing('test')
+    pulse = CapturePulse(router.source)
+    pulse.move_fails = True
+    router.run_override = pulse
+    state = router.reconcile(settings())
+    assert 'Could not reconnect cs2' in state['message']
+    assert 'source' in router.modules and 'mic' in router.modules and 'clips_mix' in router.modules
+    assert pulse.streams[0]['source'] == 1
+
+
+def test_restore_rechecks_changed_target_before_moving():
+    router = Routing('test')
+    pulse = CapturePulse(router.source)
+    router.run_override = pulse
+    requested = router.capture_apps()[0]
+    pulse.streams[0]['properties']['target.object'] = 'physical-mic'
+    router.connect_app(requested, restore=True)
+    assert not any(c[0] == 'move-source-output' for c in pulse.calls)
+
+
+def test_already_connected_app_is_not_moved_again():
+    router = Routing('test')
+    pulse = CapturePulse(router.source)
+    pulse.streams[0]['source'] = 2
+    router.run_override = pulse
+    router.reconcile(settings())
+    assert not any(c[0] == 'move-source-output' for c in pulse.calls)
