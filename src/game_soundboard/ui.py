@@ -1,5 +1,4 @@
 from __future__ import annotations
-import copy
 import re
 import threading
 import textwrap
@@ -11,7 +10,7 @@ from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, Q
     QLabel, QPushButton, QLineEdit, QFileDialog, QMessageBox, QScrollArea, QFrame,
     QSlider, QCheckBox, QComboBox, QDialog, QFormLayout, QDialogButtonBox)
 from .playback import Playback
-from .routing import Routing
+from .audio_service import AudioClient
 from .voice_effects import PRESETS
 from .shortcuts import Shortcuts
 from .keybinds import ShortcutRecorder, normalized_trigger
@@ -25,8 +24,7 @@ class RoutingWorker(QObject):
 
     def __init__(self, library):
         super().__init__()
-        self.router = Routing(library.root)
-        self.settings = copy.deepcopy(library.settings)
+        self.client = AudioClient(library.root)
         self.connect_requests = []
         self.lock = threading.Lock()
         self.wake = threading.Event()
@@ -34,8 +32,7 @@ class RoutingWorker(QObject):
         self.thread = threading.Thread(target=self.run, daemon=True)
 
     def update(self, settings):
-        with self.lock:
-            self.settings = copy.deepcopy(settings)
+        # The GUI has atomically saved the manifest before notifying this worker.
         self.wake.set()
 
     def connect_app(self, app):
@@ -46,40 +43,21 @@ class RoutingWorker(QObject):
     def run(self):
         while not self.stopping.is_set():
             try:
-                with self.lock:
-                    settings = copy.deepcopy(self.settings)
-                initial = None
-                if not settings.get("devices_initialized"):
-                    sources, sinks = self.router.devices()
-                    mic = self.router.call("get-default-source")
-                    out = self.router.call("get-default-sink")
-                    settings["microphone"] = mic if mic in {d["name"] for d in sources} else ""
-                    settings["output"] = out if out in {d["name"] for d in sinks} else ""
-                    settings["devices_initialized"] = True
-                    initial = settings
-                    with self.lock:
-                        self.settings.update({k: settings[k] for k in ("microphone", "output", "devices_initialized")})
-                state = self.router.reconcile(settings)
+                self.client.ensure_running()
+                state = self.client.request("refresh")
                 with self.lock:
                     requests, self.connect_requests = self.connect_requests, []
                 for requested in requests:
                     try:
-                        self.router.connect_app(requested)
+                        state = self.client.request("connect", app=requested)
                         self.connected.emit(requested["name"] + " connected to Soundboard Microphone")
                     except Exception as exc:
                         self.connected.emit("Could not connect app: " + str(exc))
-                if requests:
-                    state = self.router.reconcile(settings)
-                state["initial_settings"] = initial
                 self.result.emit(state)
             except Exception as exc:
                 self.error.emit(str(exc))
             self.wake.wait(3)
             self.wake.clear()
-        try:
-            self.router.cleanup()
-        except Exception as exc:
-            self.error.emit("Audio cleanup failed: " + str(exc))
 
     def stop(self):
         self.stopping.set()
@@ -457,7 +435,7 @@ class Window(QMainWindow):
         info = QLabel("Assign sound keybinds using each card’s Edit button.\n"
                       "Select Soundboard Microphone inside your game/Discord.\n"
                       "Game push-to-talk still applies; noise suppression may filter clips.\n"
-                      "Closing the window quits; minimize to keep shortcuts active.")
+                      "Closing the panel stops clips and shortcuts; the microphone stays available.")
         info.setWordWrap(True)
         form.addRow(info)
         form.addRow(button("Configure approved shortcuts in desktop", self.configure_desktop))

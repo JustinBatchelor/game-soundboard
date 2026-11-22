@@ -1,10 +1,14 @@
 """Live window smoke test. Does not play clips, assign shortcuts, or change audio defaults."""
 import tempfile
+import os
+import signal
+import time
 import wave
 from pathlib import Path
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 from game_soundboard import APP_ID
+from game_soundboard.audio_service import AudioClient
 from game_soundboard.library import Library
 from game_soundboard.ui import Window
 from game_soundboard.starters import STARTERS
@@ -50,6 +54,14 @@ def verify():
         window.close()
 QTimer.singleShot(5000, verify)
 app.exec()
+client = AudioClient(library.root)
+pid = client.request("ping")["pid"]
+os.kill(pid, signal.SIGTERM)
+for _ in range(50):
+    if not client.path.exists():
+        break
+    time.sleep(.1)
+assert not client.path.exists(), "Temporary audio service did not stop"
 workspace.cleanup()
 if failures:
     raise RuntimeError(failures)

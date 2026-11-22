@@ -11,6 +11,6 @@ executable = str(root / 'run.sh').replace('\\', '\\\\').replace('"', '\\"').repl
 target = applications / 'io.github.local.GameSoundboard.desktop'
 target.write_text('[Desktop Entry]\nType=Application\nName=Game Soundboard\n'
                   'Comment=Sound clips and your voice in one virtual microphone\n'
-                  f'Exec="{executable}"\nIcon=audio-card\nTerminal=false\n'
+                  f'Exec="{executable}"\nIcon={root / "src/game_soundboard/assets/icon.png"}\nTerminal=false\n'
                   'Categories=AudioVideo;Audio;\nStartupNotify=true\n')
 print(target)

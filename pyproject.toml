@@ -18,6 +18,9 @@ game-soundboard = "game_soundboard.app:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+game_soundboard = ["assets/*.png"]
+
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]

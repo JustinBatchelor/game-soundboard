@@ -5,6 +5,7 @@ from pathlib import Path
 import signal
 import sys
 from PySide6.QtCore import QLockFile, QTimer
+from PySide6.QtGui import QIcon
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import QApplication, QMessageBox
 from . import APP_ID
@@ -20,6 +21,7 @@ def main():
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     app = QApplication(sys.argv[:1])
     app.setApplicationName("Game Soundboard")
+    app.setWindowIcon(QIcon(str(Path(__file__).parent / "assets/icon.png")))
     app.setDesktopFileName(APP_ID)
     root = data_directory()
     root.mkdir(parents=True, exist_ok=True)

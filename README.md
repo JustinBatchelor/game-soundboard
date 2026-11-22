@@ -16,7 +16,7 @@ cd game-soundboard
 
 Setup creates an isolated `.venv` and installs a per-user **Game Soundboard** desktop launcher. You can subsequently launch it from your applications menu. Keep the checkout in place because the launcher points to it; rerun `scripts/install-desktop.py` with the virtual environment's Python if you move it.
 
-The setup script uses `uv` when available, otherwise Python's venv/pip. FFmpeg is supplied by `imageio-ffmpeg` if a system FFmpeg is unavailable. The application does not start automatically at login.
+The setup script uses `uv` when available, otherwise Python's venv/pip. FFmpeg is supplied by `imageio-ffmpeg` if a system FFmpeg is unavailable. The microphone service starts at login; the panel still launches manually.
 
 For optional live microphone effects, install `rubberband-ladspa` (version **4.0 or newer** for Baby/Helium and Deep voice) and `swh-plugins` (Robot and Radio):
 
@@ -35,9 +35,28 @@ Older Ubuntu releases may ship Rubber Band 3.x without the live pitch plugin. No
 5. Use a card's **Edit** button, click the keybind field, and press your desired combination (for example **Ctrl+Alt+K** or **F8**). Use **Clear** to disable it. Save and approve the desktop's shortcut dialog. The card displays the desktop's accepted binding.
 6. Record the Stop All keybind the same way in settings. Global shortcut playback is paused while either settings dialog is open, so recording keys does not trigger sounds. Stop All stops clips and previews; your voice remains connected. **Mute voice** mutes only the app's microphone route.
 
-Different clips overlap. Repeating a clip restarts it. Minimize to keep running; close to quit and remove the virtual devices. Games can require reselecting their microphone after restarting the app. Game push-to-talk still applies, and noise suppression can filter clips. The app does not press a game's push-to-talk key.
+Different clips overlap. Repeating a clip restarts it. Minimize to keep shortcuts active. Closing the panel stops clips and shortcuts, but its separate audio service keeps the same virtual microphone, voice routing, mute, volume, and effect settings available. Reopening the panel does not recreate the input device. Game push-to-talk still applies, and noise suppression can filter clips. The app does not press a game's push-to-talk key.
 
 When the virtual microphone is recreated, the app reconnects existing native recording streams that still explicitly request its device name but were moved to a fallback input. This recovery runs when rebuilding the audio graph; it does not override later manual input changes or move apps requesting another microphone. If a game has closed its capture stream entirely, reopen its microphone test or restart the game with the soundboard running.
+
+## Persistent microphone service
+
+`setup.sh` installs and enables `game-soundboard-audio.service` for your user. It keeps **Soundboard Microphone** available even while the panel is closed, including the selected physical microphone and live effect. Self-monitoring and mute also retain their saved states. No clip can play or global shortcut fire after the panel exits.
+
+```bash
+systemctl --user status game-soundboard-audio.service
+journalctl --user -u game-soundboard-audio.service -n 50
+```
+
+To remove the always-available microphone, close the panel and run:
+
+```bash
+systemctl --user disable --now game-soundboard-audio.service
+```
+
+Opening the panel starts the service again. Re-enable login startup with `systemctl --user enable game-soundboard-audio.service`. A source checkout without an installed unit starts a detached daemon for its library instead; its log is `audio-service.log` in that library directory.
+
+The first upgrade from panel-owned routing requires one device replacement. A game may need one restart during that handoff. Routine panel closes and reopens preserve the device afterward. Explicit service stops, audio-server restarts, and logout can still interrupt capture; no service can retain a PipeWire device across the audio server itself being replaced.
 
 ## Live voice effects and microphone checks
 
@@ -70,12 +89,13 @@ Data lives in `$XDG_DATA_HOME/game-soundboard` (normally `~/.local/share/game-so
 
 - `library`: asynchronous preparation, atomic persistence and starter history.
 - `playback`: reusable Qt sound effects; shared click/shortcut playback path.
-- `routing`: PipeWire/PulseAudio modules controlled in a worker thread; three-second health checks and recovery.
+- `audio_service`: per-library background graph owner, with a private Unix socket for panel controls and three-second health checks. The service reads settings from the atomic manifest; only the GUI writes the library.
+- `routing`: PipeWire/PulseAudio module creation, recovery, and capture connection management.
 - `voice_effects`: microphone-only LADSPA presets, using Rubber Band's live pitch shifter and SWH filters.
 - `shortcuts`: XDG GlobalShortcuts portal in an asyncio worker, delivering Qt signals.
 - `ui`: searchable grid, import workers, controls and device settings.
 
-The D-Bus transport uses `dbus-next` because PySide6 does not expose the custom-type registration needed for the portal's `a(sa{sv})` messages. It registers the installed desktop ID with the host portal Registry. No raw keyboard hooks, root input access, network listener, or background autostart service is used.
+The D-Bus transport uses `dbus-next` because PySide6 does not expose the custom-type registration needed for the portal's `a(sa{sv})` messages. It registers the installed desktop ID with the host portal Registry. The audio service starts in the user session. Its control socket is restricted to the current user; there is no TCP listener, raw keyboard hook, or root input access.
 
 ```text
 Clips -> Clip bus -----------------> Voice mix -> Soundboard Microphone -> Game/Discord
@@ -87,7 +107,7 @@ Clips -> Clip bus -----------------> Voice mix -> Soundboard Microphone -> Game/
 Preview -> Headphones only
 ```
 
-Owned module names include a hash of the library path. Normal exit removes them; next launch reconciles leftovers after a crash. Recovery touches only that library's modules. Unplugged devices are not silently replaced; their routes suspend until the same named device returns. Global shortcut session loss is reported and can be reconnected from settings. An unsupported or malformed manifest is left untouched and produces an error.
+Owned module names include a hash of the library path. Panel exit leaves them running. Explicitly stopping the audio service removes them; a service restart reconciles leftovers after a crash. Recovery touches only that library's modules. Unplugged devices are not silently replaced; their routes suspend until the same named device returns. Global shortcut session loss is reported and can be reconnected from settings. An unsupported or malformed manifest is left untouched and produces an error.
 
 ## Verification
 
@@ -96,6 +116,7 @@ Owned module names include a hash of the library path. Normal exit removes them;
 PYTHONPATH=src QT_QPA_PLATFORM=offscreen .venv/bin/python scripts/probe-live.py
 PYTHONPATH=src QT_QPA_PLATFORM=offscreen .venv/bin/python scripts/test-live-audio.py
 PYTHONPATH=src .venv/bin/python scripts/test-reconnect-live.py
+PYTHONPATH=src QT_QPA_PLATFORM=offscreen .venv/bin/python scripts/test-single-instance.py
 ./run.sh --screenshot /tmp/soundboard.png
 ```
 
@@ -112,7 +133,7 @@ The remaining user acceptance checks are approving chosen keybinds, triggering t
 - Live synthetic audio verified overlapping clips plus voice in the virtual microphone, preview isolation, monitoring without voice feedback, microphone mute, and Stop All preserving voice.
 - Live spectral tests verified both pitch shifts, robot modulation, radio filtering, optional voice monitoring, unchanged clips, and a stable virtual microphone across preset changes.
 - Warm trigger-to-capture measured about 42 ms in the synthetic test on the current desktop. Fullscreen-game keybind timing and network/voice-chat processing remain unmeasured.
-- Live UI, device discovery, search, single-instance activation, graceful shutdown, and module cleanup passed.
+- Live UI, device discovery, search, and single-instance activation passed. Two panel closes/reopens retained the exact same microphone device ID and native capture stream. Duplicate services do not disturb the owner; explicit service shutdown cleans up its modules.
 - On the development desktop, the user confirmed CS2's microphone test played both their voice and clips after reselecting **Soundboard Microphone** (2026-11-22). Live signal measurements also confirmed the physical microphone reached the virtual input at matching levels.
 - All three starter recordings downloaded and decoded. Local speech recognition confirmed “Oh yeah” and “Bomb has been planted.” Kaboom uses audio from the linked YouTube video (UO9JSE3aRtw).
 

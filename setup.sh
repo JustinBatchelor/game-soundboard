@@ -10,6 +10,7 @@ else
     .venv/bin/python -m pip install -e '.[test]'
 fi
 .venv/bin/python scripts/install-desktop.py
+.venv/bin/python scripts/install-audio-service.py
 if ! command -v pactl >/dev/null && ! test -x .runtime/usr/bin/pactl; then
     echo 'Install the audio control utility: sudo apt install pulseaudio-utils'
 fi
