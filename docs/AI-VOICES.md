@@ -2,7 +2,7 @@
 
 The panel can select a local RVC model, adjust pitch (−12 to +12 semitones), and use Responsive or Balanced processing. **Normal is always the audio service's startup mode**, even if a preferred AI model was saved. Use **Hear my voice** to audition through the selected headphones. **Return to Normal** also cancels loading and releases the worker's GPU memory; its optional global shortcut is configured under Audio & shortcuts. Global shortcuts require the panel to remain running (minimized is fine).
 
-The two personally installed presets are **Donald Trump — AI impression** and **Elon Musk — AI impression**. The user confirmed understandable live output and CS2 reception on 2026-11-22, then requested better resemblance; these are functional candidates, not final quality endorsements. They are experimental for gaming: end-to-end latency, matched CS2 FPS impact, and the 30-minute gameplay acceptance test remain unverified. Joe Rogan remains unavailable because the discovered model had no documented usage terms. There is no substitute voice behind an unavailable entry. No celebrity weights or speech recordings are distributed in this public repository.
+The two personally installed presets are **Donald Trump — AI impression** and **Elon Musk — AI impression**. The user preferred alternative checkpoints in a same-sentence listening comparison on 2026-11-22; those replace the initial candidates while retaining the preset IDs and tuning. They are experimental for gaming: end-to-end latency, matched CS2 FPS impact, and the 30-minute gameplay acceptance test remain unverified. Joe Rogan remains unavailable because the discovered model had no documented usage terms. There is no substitute voice behind an unavailable entry. No celebrity weights or speech recordings are distributed in this public repository.
 
 ## Setup and model management
 
@@ -46,8 +46,8 @@ Existing `ping`, `status`, `refresh`, and `connect` IPC commands remain availabl
 
 | Voice | Source and documented terms | Observation |
 |---|---|---|
-| Trump | [HaruNova/HaruNovaRVC](https://huggingface.co/HaruNova/HaruNovaRVC), repository declares OpenRAIL; detailed training provenance is incomplete | Standard RVC v2, 40 kHz. Initial short-history audition was unintelligible. With more past speech context, the user accepted the revised impression. |
-| Musk | [UnidentifiedPerson/VoiceModels](https://huggingface.co/UnidentifiedPerson/VoiceModels), author permits personal/educational voice-changer use and describes edited interview training data | Standard RVC v2, 48 kHz. User accepted reference-speech audition. |
+| Trump | [Coolwowsocoolwow/Donald-J.-Trump](https://huggingface.co/Coolwowsocoolwow/Donald-J.-Trump), repository declares OpenRAIL; detailed training provenance is incomplete | User preferred this alternative to the initial HaruNova checkpoint. Installed locally with the previous checkpoint backed up. |
+| Musk | [anonymous12345678910/ElonMuskV2](https://huggingface.co/anonymous12345678910/ElonMuskV2), repository declares CC BY 4.0 and identifies 14 minutes of a Lex Fridman interview as training material | User preferred this alternative to the initial UnidentifiedPerson checkpoint. Original creator attribution retained in the local model record. |
 | Rogan | [GarrGarr/RVC_Models](https://huggingface.co/GarrGarr/RVC_Models), JoeRogan-48k.zip found, no model card/usage terms found | Unavailable; weights not installed. |
 
 Observation date: 2026-11-22. A repository license label is recorded evidence, not independent verification of training-data rights or identity accuracy. Actual local records retain the source, terms, SHA-256, listening result, and tuning. Reimporting elsewhere does not inherit the personal listening approval automatically.
@@ -80,10 +80,12 @@ RTX 4070 Ti SUPER, driver 595.99.02. Short reference-speech test, Responsive (80
 
 | Model | Processing p50 | Processing p95 | Missed processing deadlines |
 |---|---:|---:|---:|
-| Trump | 47.5 ms | 54.3 ms | 0 / 74 blocks |
-| Musk | 48.4 ms | 51.8 ms | 0 / 74 blocks |
+| Trump, original candidate | 47.5 ms | 54.3 ms | 0 / 74 blocks |
+| Musk, original candidate | 48.4 ms | 51.8 ms | 0 / 74 blocks |
+| Trump, preferred alternative | 47.2 ms | 51.4 ms | 0 / 74 blocks |
+| Musk, preferred alternative | 46.4 ms | 51.7 ms | 0 / 74 blocks |
 
-Load plus warm-up was about 7.3–7.5 seconds. CS2 was running, but these were not matched gameplay benchmarks. End-to-end latency, FPS impact and a 30-minute gameplay run remain unmeasured. These are observations on one machine, not performance guarantees.
+Load plus warm-up was about 7.0–7.5 seconds. CS2 was running, but these were not matched gameplay benchmarks. End-to-end latency, FPS impact and a 30-minute gameplay run remain unmeasured. These are observations on one machine, not performance guarantees.
 
 A 90-second private-device stream test observed processing p95 63.5 ms and one dropped input block. Killing its AI worker restored Normal within three seconds with mute retained; the microphone node and native capture connection stayed unchanged. A separate panel lifecycle test verified two closes/reopens and a service crash/restart retained the same source and capture IDs. Existing synthetic clip/preview/generic-effect/mute tests passed.
 

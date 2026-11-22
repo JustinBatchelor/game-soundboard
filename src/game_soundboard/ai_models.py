@@ -17,8 +17,8 @@ PROJECT = Path(__file__).resolve().parents[2]
 RUNTIME = PROJECT / ".runtime"
 AI_PYTHON = RUNTIME / "ai-venv/bin/python"
 NAMED_PRESETS = (
-    ("trump", "Donald Trump", "https://huggingface.co/HaruNova/HaruNovaRVC", "Local model required; revised candidate passed listening, gameplay checks pending"),
-    ("musk", "Elon Musk", "https://huggingface.co/UnidentifiedPerson/VoiceModels", "Local model required; candidate passed listening, gameplay checks pending"),
+    ("trump", "Donald Trump", "https://huggingface.co/Coolwowsocoolwow/Donald-J.-Trump", "Local model required; alternative preferred in listening comparison, gameplay checks pending"),
+    ("musk", "Elon Musk", "https://huggingface.co/anonymous12345678910/ElonMuskV2", "Local model required; alternative preferred in listening comparison, gameplay checks pending"),
     ("rogan", "Joe Rogan", "https://huggingface.co/GarrGarr/RVC_Models", "No documented model usage terms found"),
 )
 MAX_MODEL = 512 * 1024 * 1024
