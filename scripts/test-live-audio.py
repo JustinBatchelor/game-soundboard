@@ -129,6 +129,30 @@ try:
         assert all(mix[f] > 100 for f in [440, 660, 880]) and mix[1320] < 30
         assert all(headphones[f] > 100 for f in [440, 660, 1320]) and headphones[880] < 30
         print('PASS: overlapping clips + voice in virtual mic; preview excluded; no voice in headphones', flush=True)
+        # A generated clip uses the same explicit routes before it is saved.
+        playback.stop_all()
+        generated = lib.root / 'speech/jobs/test/generated.wav'
+        generated.parent.mkdir(parents=True)
+        tone(generated, 1320)
+        generated_id = playback.add_temporary(generated, 'Generated speech fixture')
+        playback.effect(playback.temporary[generated_id], True)
+        playback.effect(playback.temporary[generated_id], False)
+        pump(.3)
+        playback.play(generated_id, preview=True)
+        pump(.6)
+        assert spectrum(root / 'mix.pcm')[1320] < 30
+        assert spectrum(root / 'headphones.pcm')[1320] > 100
+        playback.stop_all()
+        playback.play(generated_id)
+        pump(.6)
+        assert spectrum(root / 'mix.pcm')[1320] > 100
+        playback.stop_all()
+        pump(.5)
+        assert spectrum(root / 'mix.pcm')[1320] < 30
+        assert spectrum(root / 'mix.pcm')[880] > 100
+        playback.remove(generated_id)
+        assert generated_id not in playback.temporary
+        print('PASS: temporary speech Preview excluded, Play reaches mic, Stop All preserves voice', flush=True)
         settings['mic_muted'] = True
         router.reconcile(settings)
         pump(.5)

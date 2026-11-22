@@ -1,5 +1,7 @@
 # Local live AI impressions
 
+Historical documentation: live celebrity controls were replaced by [typed AI Speech](AI-SPEECH.md) on 2026-11-22. RVC model files and service commands remain for rollback; the current panel uses normal/generic microphone processing and separately generated speech clips.
+
 The panel can select a local RVC model, adjust pitch (−12 to +12 semitones), and use Responsive or Balanced processing. **Normal is always the audio service's startup mode**, even if a preferred AI model was saved. Use **Hear my voice** to audition through the selected headphones. **Return to Normal** also cancels loading and releases the worker's GPU memory; its optional global shortcut is configured under Audio & shortcuts. Global shortcuts require the panel to remain running (minimized is fine).
 
 The two personally installed presets are **Donald Trump — AI impression** and **Elon Musk — AI impression**. The user preferred alternative checkpoints in a same-sentence listening comparison on 2026-11-22; those replace the initial candidates while retaining the preset IDs and tuning. They are experimental for gaming: end-to-end latency, matched CS2 FPS impact, and the 30-minute gameplay acceptance test remain unverified. Joe Rogan remains unavailable because the discovered model had no documented usage terms. There is no substitute voice behind an unavailable entry. No celebrity weights or speech recordings are distributed in this public repository.

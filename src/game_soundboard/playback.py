@@ -1,5 +1,8 @@
 from PySide6.QtCore import QObject, QUrl, Signal, Slot
 from PySide6.QtMultimedia import QMediaDevices, QSoundEffect
+from pathlib import Path
+import uuid
+from .speech import validate_audio
 
 
 class Playback(QObject):
@@ -11,6 +14,7 @@ class Playback(QObject):
         self.library = library
         self.effects = {}
         self.preview_effects = {}
+        self.temporary = {}
         self.clip_device = None
         self.output_device = None
         self.media = QMediaDevices(self)
@@ -67,7 +71,7 @@ class Playback(QObject):
             self.error.emit(f'Cannot load {effect.property("sound_name")}. Remove it and import the original again.')
 
     def play(self, ident, preview=False):
-        record = next((s for s in self.library.sounds if s["id"] == ident), None)
+        record = self.temporary.get(ident) or next((s for s in self.library.sounds if s["id"] == ident), None)
         if record is None:
             return
         if (self.output_device if preview else self.clip_device) is None:
@@ -78,7 +82,7 @@ class Playback(QObject):
         effect.play()
 
     def volumes(self):
-        for record in self.library.sounds:
+        for record in list(self.library.sounds) + list(self.temporary.values()):
             for cache in (self.effects, self.preview_effects):
                 if effect := cache.get(record["id"]):
                     effect.setVolume(record["volume"] * self.library.settings["master"])
@@ -88,6 +92,17 @@ class Playback(QObject):
             if effect := cache.pop(ident, None):
                 effect.stop()
                 effect.deleteLater()
+        self.temporary.pop(ident, None)
+
+    def add_temporary(self, path, name):
+        path = Path(path).resolve()
+        if not path.is_relative_to((self.library.root / "speech/jobs").resolve()):
+            raise ValueError("Generated clip is outside the speech job directory")
+        validate_audio(path)
+        ident = "speech-" + uuid.uuid4().hex
+        self.temporary[ident] = {"id": ident, "name": name, "volume": .5,
+                                 "cache": str(path.relative_to(self.library.root.resolve()))}
+        return ident
 
     def stop_all(self):
         for effect in list(self.effects.values()) + list(self.preview_effects.values()):

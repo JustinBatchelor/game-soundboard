@@ -8,14 +8,14 @@ from PySide6.QtGui import QDesktopServices
 from PySide6.QtCore import QUrl
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QLabel, QPushButton, QLineEdit, QFileDialog, QMessageBox, QScrollArea, QFrame,
-    QSlider, QCheckBox, QComboBox, QDialog, QFormLayout, QDialogButtonBox)
+    QSlider, QCheckBox, QComboBox, QDialog, QFormLayout, QDialogButtonBox, QTabWidget)
 from .playback import Playback
 from .audio_service import AudioClient
 from .voice_effects import PRESETS
 from .shortcuts import Shortcuts
 from .keybinds import ShortcutRecorder, normalized_trigger
 from .starters import STARTERS, download_starter
-from .ai_ui import AIControls
+from .speech_ui import SpeechControls
 
 
 class RoutingWorker(QObject):
@@ -111,7 +111,11 @@ QPushButton#primary { background: #177c70; border-color: #3acbb2; }
 QPushButton#stop { background: #6c2b39; border-color: #bc5c72; }
 QPushButton#pad { font-size: 20px; font-weight: bold; padding: 24px 12px; background: #213f4a; }
 QPushButton#pad[playing="true"] { background: #177c70; border: 2px solid #64efd0; }
-QLineEdit, QComboBox, QSpinBox { background: #172130; padding: 9px; border: 1px solid #40516c; border-radius: 6px; }
+QLineEdit, QPlainTextEdit, QComboBox, QSpinBox { background: #172130; padding: 9px; border: 1px solid #40516c; border-radius: 6px; }
+QTabWidget::pane { border: none; }
+QTabBar::tab { background: #172130; padding: 9px 20px; border-radius: 5px; margin-right: 6px; }
+QTabBar::tab:selected { background: #177c70; }
+QGroupBox { border: none; margin-top: 12px; }
 QComboBox QAbstractItemView { background: #172130; selection-background-color: #177c70; }
 QWidget#gridbody { background: #10151f; }
 QScrollArea { border: none; background: transparent; }
@@ -179,7 +183,7 @@ class Window(QMainWindow):
         toolbar.addWidget(self.search, 1)
         self.seed_button = button("Get starter clips", self.seed)
         toolbar.addWidget(self.seed_button)
-        toolbar.addWidget(button("■  Stop all sounds", self.playback.stop_all, "stop"))
+        toolbar.addWidget(button("■  Stop all sounds", self.stop_all, "stop"))
         layout.addLayout(toolbar)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -189,7 +193,9 @@ class Window(QMainWindow):
         self.grid.setSpacing(14)
         self.grid.setAlignment(Qt.AlignmentFlag.AlignTop)
         scroll.setWidget(self.grid_body)
-        layout.addWidget(scroll, 1)
+        self.tabs = QTabWidget()
+        self.tabs.addTab(scroll, "Soundboard")
+        layout.addWidget(self.tabs, 1)
         controls = QHBoxLayout()
         controls.addWidget(QLabel("Clips"))
         controls.addWidget(slider(library.settings["master"], lambda v: self.setting("master", v)))
@@ -218,8 +224,8 @@ class Window(QMainWindow):
         self.voice_monitor.toggled.connect(lambda value: self.setting("voice_monitor", value))
         effects.addWidget(self.voice_monitor)
         layout.addLayout(effects)
-        self.ai_controls = AIControls(self)
-        layout.addWidget(self.ai_controls)
+        self.speech_controls = SpeechControls(self)
+        self.tabs.addTab(self.speech_controls, "AI Speech")
         self.audio_status = QLabel("Connecting audio…" if live else "Preview mode · audio routing disabled")
         self.shortcut_status = QLabel("No global shortcuts assigned")
         self.feedback = QLabel("Ready · WAV, MP3, OGG and FLAC")
@@ -251,12 +257,9 @@ class Window(QMainWindow):
 
     def voice_selected(self):
         value = self.voice_effect.currentData() or "normal"
-        if value.startswith("ai:"):
-            self.ai_controls.choose(value[3:])
-        else:
-            self.setting("voice_effect", value)
-            if self.router:
-                self.router.command("voice_effect", effect=value)
+        self.setting("voice_effect", value)
+        if self.router:
+            self.router.command("voice_effect", effect=value)
 
     def return_normal(self):
         self.setting("voice_effect", "normal")
@@ -274,8 +277,10 @@ class Window(QMainWindow):
         self.sources, self.sinks = state["sources"], state["sinks"]
         self.capture_apps = state.get("capture_apps", [])
         self.audio_status.setText(state["message"])
-        self.ai_controls.populate()
-        self.ai_controls.update_state(state)
+        self.speech_controls.update_audio(state)
+        self.voice_effect.blockSignals(True)
+        self.voice_effect.setCurrentIndex(max(0, self.voice_effect.findData(state.get("active_effect", "normal"))))
+        self.voice_effect.blockSignals(False)
         self.playback.routes(state["clip_sink"], state["output"])
 
     def routing_error(self, text):
@@ -311,11 +316,15 @@ class Window(QMainWindow):
         if self.shortcuts_paused:
             return
         if ident == "stop-all":
-            self.playback.stop_all()
+            self.stop_all()
         elif ident == "voice-normal":
             self.return_normal()
         else:
             self.playback.play(ident)
+
+    def stop_all(self):
+        self.playback.stop_all()
+        self.speech_controls.generator.cancel()
 
     def binding_labels(self, labels):
         self.accepted = labels
@@ -557,6 +566,7 @@ class Window(QMainWindow):
             event.ignore()
             return
         self.playback.stop_all()
+        self.speech_controls.close_generator()
         self.executor.shutdown(wait=False)
         if self.shortcuts:
             self.shortcuts.stop()

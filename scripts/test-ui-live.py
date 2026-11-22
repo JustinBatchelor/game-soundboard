@@ -40,7 +40,9 @@ failures = []
 def verify():
     try:
         assert 'No app is using Soundboard Microphone' in window.audio_status.text(), window.audio_status.text()
-        assert window.voice_effect.count() == 8  # five generic + three unavailable named AI presets
+        assert window.voice_effect.count() == 5  # normal + four generic effects
+        assert window.speech_controls.voice.count() == 2
+        assert not window.speech_controls.generate_button.isEnabled()  # no approved voices in test library
         assert not window.voice_monitor.isChecked()
         window.voice_effect.setCurrentIndex(window.voice_effect.findData('robot'))
         assert Library(library.root).settings['voice_effect'] == 'robot'

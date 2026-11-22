@@ -60,7 +60,7 @@ The first upgrade from panel-owned routing requires one device replacement. A ga
 
 ## Live voice effects and microphone checks
 
-Local RVC **AI impressions** are available through an optional isolated runtime and managed model imports. See [AI voices: setup, routing, model evidence and acceptance tests](docs/AI-VOICES.md). AI starts off after service/login restart; **Return to Normal** cancels loading or conversion. Closing the panel leaves an already-active AI voice running. Named model weights are personal local data and are not bundled here.
+The **AI Speech** tab generates typed **AI impressions** locally: choose a voice, type a line, Generate, then Preview privately or Play through Soundboard Microphone. Save favorites as ordinary sound buttons with keybinds. Generation never plays automatically and releases GPU memory after each job. See [AI Speech setup and behavior](docs/AI-SPEECH.md). Live celebrity conversion controls have been replaced; normal microphone and generic effects remain available. Previous RVC models and service interfaces are retained for rollback; their [historical documentation](docs/AI-VOICES.md) describes the old workflow.
 
 Choose **Normal**, **Baby / Helium** (+8 semitones), **Deep voice** (−6 semitones), **Robot**, or **Radio** from the panel. These are local microphone effects; clip playback is unchanged. Normal is the default. Switching presets preserves the public microphone device and its connected applications. Missing or failed effects suspend the microphone route and display an error while keeping clips available; choose Normal to restore unprocessed voice.
 
@@ -100,6 +100,7 @@ Data lives in `$XDG_DATA_HOME/game-soundboard` (normally `~/.local/share/game-so
 - `routing`: PipeWire/PulseAudio module creation, recovery, and capture connection management.
 - `voice_effects`: microphone-only LADSPA presets, using Rubber Band's live pitch shifter and SWH filters.
 - `shortcuts`: XDG GlobalShortcuts portal in an asyncio worker, delivering Qt signals.
+- `speech`, `speech_worker`, `speech_ui`: cancellable, panel-owned offline generation, temporary clip playback, and saving to the normal library.
 - `ui`: searchable grid, import workers, controls and device settings.
 
 The D-Bus transport uses `dbus-next` because PySide6 does not expose the custom-type registration needed for the portal's `a(sa{sv})` messages. It registers the installed desktop ID with the host portal Registry. The audio service starts in the user session. Its control socket is restricted to the current user; there is no TCP listener, raw keyboard hook, or root input access.
